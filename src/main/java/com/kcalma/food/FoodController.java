@@ -2,7 +2,8 @@ package com.kcalma.food;
 
 import com.kcalma.food.ImageFormatDetector.ImageFormat;
 import com.kcalma.food.analysis.FoodAnalysisResult;
-import com.kcalma.food.analysis.FoodPhotoAnalyzer;
+import com.kcalma.food.analysis.FoodAnalyzer;
+import com.kcalma.food.dto.AnalyzeTextRequest;
 import com.kcalma.food.dto.FoodAnalysisResponse;
 import com.kcalma.food.dto.FoodEntryResponse;
 import com.kcalma.food.dto.SaveFoodEntriesRequest;
@@ -35,11 +36,12 @@ import org.springframework.web.server.ResponseStatusException;
 public class FoodController {
 
     private static final long MAX_IMAGE_BYTES = 6L * 1024 * 1024;
+    private static final int MAX_DESCRIPTION_LENGTH = 500;
 
-    private final FoodPhotoAnalyzer analyzer;
+    private final FoodAnalyzer analyzer;
     private final FoodEntryService entryService;
 
-    public FoodController(FoodPhotoAnalyzer analyzer, FoodEntryService entryService) {
+    public FoodController(FoodAnalyzer analyzer, FoodEntryService entryService) {
         this.analyzer = analyzer;
         this.entryService = entryService;
     }
@@ -49,7 +51,14 @@ public class FoodController {
         validatePresenceAndSize(image);
         byte[] imageBytes = readBytes(image);
         ImageFormat format = detectFormat(imageBytes);
-        FoodAnalysisResult result = analyzer.analyze(imageBytes, format.mimeType());
+        FoodAnalysisResult result = analyzer.analyzePhoto(imageBytes, format.mimeType());
+        return ResponseEntity.ok(FoodAnalysisResponse.from(result));
+    }
+
+    @PostMapping("/analyze-text")
+    public ResponseEntity<FoodAnalysisResponse> analyzeText(@RequestBody(required = false) AnalyzeTextRequest request) {
+        String description = validateDescription(request == null ? null : request.description());
+        FoodAnalysisResult result = analyzer.analyzeDescription(description);
         return ResponseEntity.ok(FoodAnalysisResponse.from(result));
     }
 
@@ -92,6 +101,19 @@ public class FoodController {
         if (image.getSize() > MAX_IMAGE_BYTES) {
             throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "La imagen no puede superar los 6 MB.");
         }
+    }
+
+    private String validateDescription(String description) {
+        if (description == null || description.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Contanos qué comiste.");
+        }
+        String trimmed = description.strip();
+        if (trimmed.length() > MAX_DESCRIPTION_LENGTH) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "La descripción no puede superar los " + MAX_DESCRIPTION_LENGTH + " caracteres.");
+        }
+        return trimmed;
     }
 
     /**

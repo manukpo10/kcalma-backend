@@ -4,7 +4,10 @@ import com.kcalma.food.analysis.AnalyzedFoodItem;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 
-/** One detected item from POST /api/food/analyze — not persisted yet, grams/values are editable client-side. */
+/**
+ * One detected item from POST /api/food/analyze or POST /api/food/analyze-text — not persisted
+ * yet, grams/values are editable client-side.
+ */
 public record AnalyzedItemResponse(
         String name,
         BigDecimal grams,

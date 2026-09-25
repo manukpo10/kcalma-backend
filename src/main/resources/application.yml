@@ -27,6 +27,9 @@ spring:
 
 server:
   port: ${PORT:8080}
+  error:
+    include-message: always
+    include-binding-errors: always
 
 app:
   security:

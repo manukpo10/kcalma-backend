@@ -5,7 +5,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.kcalma.food.analysis.FoodPhotoAnalyzer;
+import com.kcalma.food.analysis.FoodAnalyzer;
 import com.kcalma.security.SecurityConfig;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -42,7 +42,7 @@ class FoodControllerImageValidationTest {
     private MockMvc mockMvc;
 
     @MockitoBean
-    private FoodPhotoAnalyzer foodPhotoAnalyzer;
+    private FoodAnalyzer foodAnalyzer;
 
     @MockitoBean
     private FoodEntryService foodEntryService;
@@ -64,7 +64,7 @@ class FoodControllerImageValidationTest {
                         .header("Authorization", "Bearer " + TOKEN))
                 .andExpect(status().isUnsupportedMediaType());
 
-        verifyNoInteractions(foodPhotoAnalyzer);
+        verifyNoInteractions(foodAnalyzer);
     }
 
     private static Jwt jwtFor(String subject) {

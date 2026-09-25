@@ -4,7 +4,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.kcalma.food.analysis.FoodPhotoAnalyzer;
+import com.kcalma.food.analysis.FoodAnalyzer;
 import com.kcalma.security.SecurityConfig;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -42,7 +42,7 @@ class FoodControllerSecurityTest {
     private MockMvc mockMvc;
 
     @MockitoBean
-    private FoodPhotoAnalyzer foodPhotoAnalyzer;
+    private FoodAnalyzer foodAnalyzer;
 
     @MockitoBean
     private FoodEntryService foodEntryService;

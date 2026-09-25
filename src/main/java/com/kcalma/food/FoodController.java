@@ -12,6 +12,7 @@ import jakarta.validation.Valid;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -92,6 +93,41 @@ public class FoodController {
         return entryService.delete(userId, id)
                 ? ResponseEntity.noContent().build()
                 : ResponseEntity.notFound().build();
+    }
+
+    /** Wipes an entire meal (e.g. every "Desayuno" item on one day) for the caller in one shot. */
+    @DeleteMapping("/entries")
+    public ResponseEntity<Void> deleteMealEntries(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(required = false) String date,
+            @RequestParam(required = false) String mealType) {
+        UUID userId = UUID.fromString(jwt.getSubject());
+        LocalDate parsedDate = validateDate(date);
+        MealType parsedMealType = validateMealType(mealType);
+        entryService.deleteAllByMeal(userId, parsedDate, parsedMealType);
+        return ResponseEntity.noContent().build();
+    }
+
+    private LocalDate validateDate(String date) {
+        if (date == null || date.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Falta la fecha.");
+        }
+        try {
+            return LocalDate.parse(date);
+        } catch (DateTimeParseException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "La fecha no es válida.");
+        }
+    }
+
+    private MealType validateMealType(String mealType) {
+        if (mealType == null || mealType.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Falta el tipo de comida.");
+        }
+        try {
+            return MealType.valueOf(mealType);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "El tipo de comida no es válido.");
+        }
     }
 
     private void validatePresenceAndSize(MultipartFile image) {

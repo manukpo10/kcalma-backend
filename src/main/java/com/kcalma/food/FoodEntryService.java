@@ -48,6 +48,12 @@ public class FoodEntryService {
         return entry.isPresent();
     }
 
+    /** Wipes every entry of one meal/day for the caller in a single delete — a no-op if none matched. */
+    @Transactional
+    public void deleteAllByMeal(UUID userId, LocalDate date, MealType mealType) {
+        repository.deleteByUserIdAndEntryDateAndMealType(userId, date, mealType);
+    }
+
     private FoodEntry toEntity(UUID userId, FoodEntryRequest request) {
         return new FoodEntry(
                 userId,

@@ -41,6 +41,15 @@ app:
     model: ${GEMINI_MODEL:gemini-3.5-flash-lite}
     base-url: https://generativelanguage.googleapis.com
 
+# Off by default (production on Render stays off) — SecurityConfig gates /v3/api-docs and
+# /swagger-ui/** behind this same env var, so the docs' own registration and their exposure
+# through the security filter chain can't drift out of sync.
+springdoc:
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:false}
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:false}
+
 management:
   endpoints:
     web:

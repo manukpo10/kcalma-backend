@@ -2,6 +2,7 @@ package com.kcalma.security;
 
 import java.util.List;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -40,10 +41,12 @@ public class SecurityConfig {
     private static final String AUDIENCE = "authenticated";
 
     private final AppSecurityProperties properties;
+    private final boolean swaggerEnabled;
     private final AuthenticationTrustResolver trustResolver = new AuthenticationTrustResolverImpl();
 
-    public SecurityConfig(AppSecurityProperties properties) {
+    public SecurityConfig(AppSecurityProperties properties, @Value("${SWAGGER_ENABLED:false}") boolean swaggerEnabled) {
         this.properties = properties;
+        this.swaggerEnabled = swaggerEnabled;
     }
 
     @Bean
@@ -51,10 +54,19 @@ public class SecurityConfig {
         http.csrf(AbstractHttpConfigurer::disable)
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
-                        .requestMatchers("/api/**").access(ownerOnly())
-                        .anyRequest().authenticated())
+                .authorizeHttpRequests(auth -> {
+                    auth.requestMatchers("/actuator/health", "/actuator/health/**").permitAll();
+                    // springdoc's own controllers aren't even registered when SWAGGER_ENABLED is
+                    // false (see application.yml), so this only ever widens access when the docs
+                    // truly exist; leaving the matcher out otherwise means these paths fall back
+                    // to the default "authenticated" rule below (401 with no token) on top of the
+                    // 404 springdoc itself would already give.
+                    if (swaggerEnabled) {
+                        auth.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll();
+                    }
+                    auth.requestMatchers("/api/**").access(ownerOnly());
+                    auth.anyRequest().authenticated();
+                })
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.decoder(jwtDecoder())));
         return http.build();
     }

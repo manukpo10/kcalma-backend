@@ -1,0 +1,41 @@
+spring:
+  application:
+    name: kcalma-api
+  config:
+    import: "optional:file:.env[.properties]"
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: 3
+      minimum-idle: 1
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: app
+  flyway:
+    schemas: app
+    default-schema: app
+
+server:
+  port: ${PORT:8080}
+
+app:
+  security:
+    supabase-url: ${SUPABASE_URL}
+    owner-user-ids: ${OWNER_USER_IDS:}
+    allowed-origins: ${ALLOWED_ORIGINS:http://localhost:5173}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+      show-components: never

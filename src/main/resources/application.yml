@@ -20,6 +20,10 @@ spring:
   flyway:
     schemas: app
     default-schema: app
+  servlet:
+    multipart:
+      max-file-size: 8MB
+      max-request-size: 8MB
 
 server:
   port: ${PORT:8080}
@@ -29,6 +33,10 @@ app:
     supabase-url: ${SUPABASE_URL}
     owner-user-ids: ${OWNER_USER_IDS:}
     allowed-origins: ${ALLOWED_ORIGINS:http://localhost:5173}
+  gemini:
+    api-key: ${GEMINI_API_KEY}
+    model: ${GEMINI_MODEL:gemini-3.5-flash-lite}
+    base-url: https://generativelanguage.googleapis.com
 
 management:
   endpoints:

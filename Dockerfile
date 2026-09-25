@@ -30,7 +30,7 @@ USER kcalma
 # 512 MB Render free-tier tuning: cap heap/metaspace/threads well below the container limit.
 ENV JAVA_TOOL_OPTIONS="-Xmx200m -Xss512k -XX:MaxMetaspaceSize=160m -XX:ReservedCodeCacheSize=48m -XX:MaxDirectMemorySize=32m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -XX:+ExitOnOutOfMemoryError"
 ENV MALLOC_ARENA_MAX=2
-ENV SERVER_TOMCAT_THREADS_MAX=20
+ENV SERVER_TOMCAT_THREADS_MAX=8
 
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "app.jar"]

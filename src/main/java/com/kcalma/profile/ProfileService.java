@@ -35,6 +35,7 @@ public class ProfileService {
         profile.setWeightKg(request.weightKg());
         profile.setActivityLevel(request.activityLevel());
         profile.setGoal(request.goal());
+        profile.setGoalWeightKg(request.goalWeightKg());
         UserProfile saved = repository.save(profile);
         return toResponse(saved);
     }

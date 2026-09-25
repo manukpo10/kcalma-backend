@@ -19,4 +19,7 @@ public record ProfileRequest(
         @NotNull @Min(50) @Max(250) Integer heightCm,
         @NotNull @DecimalMin("20.0") @DecimalMax("500.0") BigDecimal weightKg,
         @NotNull ActivityLevel activityLevel,
-        @NotNull Goal goal) {}
+        @NotNull Goal goal,
+        @DecimalMin(value = "30.0", message = "El peso objetivo debe ser al menos 30 kg.")
+                @DecimalMax(value = "300.0", message = "El peso objetivo no puede superar los 300 kg.")
+                BigDecimal goalWeightKg) {}

@@ -13,6 +13,12 @@ public interface FoodEntryRepository extends JpaRepository<FoodEntry, UUID> {
 
     List<FoodEntry> findByUserIdAndEntryDateOrderByCreatedAtAsc(UUID userId, LocalDate entryDate);
 
+    /** Every entry in a date range, oldest first — used to build the progress screen's nutrition history. */
+    List<FoodEntry> findByUserIdAndEntryDateBetweenOrderByEntryDateAsc(UUID userId, LocalDate from, LocalDate to);
+
+    /** Earliest logged date for a user — used to bound the "ALL" range on the progress screen. */
+    Optional<FoodEntry> findFirstByUserIdOrderByEntryDateAsc(UUID userId);
+
     /** Owner-scoped lookup: an id that exists but belongs to another user resolves empty, never a value. */
     Optional<FoodEntry> findByIdAndUserId(UUID id, UUID userId);
 

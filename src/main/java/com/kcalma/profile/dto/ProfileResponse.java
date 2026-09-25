@@ -17,6 +17,7 @@ public record ProfileResponse(
         BigDecimal weightKg,
         ActivityLevel activityLevel,
         Goal goal,
+        BigDecimal goalWeightKg,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt) {
 
@@ -29,6 +30,7 @@ public record ProfileResponse(
                 profile.getWeightKg(),
                 profile.getActivityLevel(),
                 profile.getGoal(),
+                profile.getGoalWeightKg(),
                 profile.getCreatedAt(),
                 profile.getUpdatedAt());
     }

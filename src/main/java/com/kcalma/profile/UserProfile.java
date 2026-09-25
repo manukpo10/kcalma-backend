@@ -43,6 +43,10 @@ public class UserProfile {
     @Column(name = "goal", nullable = false, length = 20)
     private Goal goal;
 
+    /** Optional target weight set from the profile screen; null means no goal set yet. */
+    @Column(name = "goal_weight_kg", precision = 5, scale = 2)
+    private BigDecimal goalWeightKg;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
@@ -109,6 +113,14 @@ public class UserProfile {
 
     public void setGoal(Goal goal) {
         this.goal = goal;
+    }
+
+    public BigDecimal getGoalWeightKg() {
+        return goalWeightKg;
+    }
+
+    public void setGoalWeightKg(BigDecimal goalWeightKg) {
+        this.goalWeightKg = goalWeightKg;
     }
 
     public OffsetDateTime getCreatedAt() {

@@ -91,7 +91,7 @@ class ProfileControllerSecurityTest {
         OffsetDateTime now = OffsetDateTime.now();
         ProfileResponse profile = new ProfileResponse(
                 id, Sex.FEMALE, LocalDate.of(1990, 1, 1), 165, new BigDecimal("60.00"),
-                ActivityLevel.SEDENTARY, Goal.MAINTAIN, now, now);
+                ActivityLevel.SEDENTARY, Goal.MAINTAIN, new BigDecimal("55.00"), now, now);
         NutritionTargetsResponse targets =
                 new NutritionTargetsResponse(1800, false, 96, 60, 180, 25, 45, 2000, 2100);
         return new ProfileWithTargetsResponse(profile, targets);

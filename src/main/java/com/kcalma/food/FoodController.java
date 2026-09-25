@@ -1,5 +1,6 @@
 package com.kcalma.food;
 
+import com.kcalma.food.ImageFormatDetector.ImageFormat;
 import com.kcalma.food.analysis.FoodAnalysisResult;
 import com.kcalma.food.analysis.FoodPhotoAnalyzer;
 import com.kcalma.food.dto.FoodAnalysisResponse;
@@ -45,8 +46,10 @@ public class FoodController {
 
     @PostMapping(value = "/analyze", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<FoodAnalysisResponse> analyze(@RequestParam("image") MultipartFile image) {
-        validateImage(image);
-        FoodAnalysisResult result = analyzer.analyze(readBytes(image), image.getContentType());
+        validatePresenceAndSize(image);
+        byte[] imageBytes = readBytes(image);
+        ImageFormat format = detectFormat(imageBytes);
+        FoodAnalysisResult result = analyzer.analyze(imageBytes, format.mimeType());
         return ResponseEntity.ok(FoodAnalysisResponse.from(result));
     }
 
@@ -82,17 +85,26 @@ public class FoodController {
                 : ResponseEntity.notFound().build();
     }
 
-    private void validateImage(MultipartFile image) {
+    private void validatePresenceAndSize(MultipartFile image) {
         if (image == null || image.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Falta la imagen.");
         }
         if (image.getSize() > MAX_IMAGE_BYTES) {
             throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "La imagen no puede superar los 6 MB.");
         }
-        String contentType = image.getContentType();
-        if (contentType == null || !contentType.startsWith("image/")) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "El archivo debe ser una imagen.");
-        }
+    }
+
+    /**
+     * Identifies the image format from its bytes instead of the client-supplied Content-Type
+     * header, which is trivial to spoof (e.g. a script uploading arbitrary bytes tagged as
+     * "image/jpeg"). The MIME type sent to the analyzer is derived from this detection, never
+     * from the header.
+     */
+    private ImageFormat detectFormat(byte[] imageBytes) {
+        return ImageFormatDetector.detect(imageBytes)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+                        "El formato de la imagen no es compatible. Los formatos permitidos son JPEG, PNG, WebP y HEIC."));
     }
 
     private byte[] readBytes(MultipartFile image) {

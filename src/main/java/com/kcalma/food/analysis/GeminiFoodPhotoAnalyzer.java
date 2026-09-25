@@ -6,6 +6,7 @@ import java.util.Base64;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -32,6 +33,7 @@ import tools.jackson.databind.node.ObjectNode;
  * correct, not a typo.
  */
 @Component
+@EnableConfigurationProperties(GeminiProperties.class)
 public class GeminiFoodPhotoAnalyzer implements FoodPhotoAnalyzer {
 
     private static final Logger log = LoggerFactory.getLogger(GeminiFoodPhotoAnalyzer.class);

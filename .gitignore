@@ -34,3 +34,8 @@ build/
 
 # Local secrets (any .env variant)
 .env*
+
+# Raw USDA FoodData Central downloads (regenerate via tools/usda/build_food_reference.py) —
+# only the compact gzipped output (src/main/resources/usda/food_reference.csv.gz) is committed.
+tools/usda/raw/
+tools/usda/*.zip

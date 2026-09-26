@@ -20,8 +20,12 @@ import com.kcalma.progress.dto.ProgressResponse;
 import com.kcalma.weight.WeightEntry;
 import com.kcalma.weight.WeightEntryRepository;
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
@@ -50,10 +54,11 @@ class ProgressServiceTest {
     private FoodEntryRepository foodEntryRepository;
 
     private final UUID userId = UUID.randomUUID();
+    private final Clock clock = Clock.systemDefaultZone();
 
     @Test
     void getProgress_noProfile_returnsEmpty() {
-        ProgressService service = new ProgressService(profileService, weightEntryRepository, foodEntryRepository);
+        ProgressService service = new ProgressService(profileService, weightEntryRepository, foodEntryRepository, clock);
         when(profileService.findByUserId(userId)).thenReturn(Optional.empty());
 
         assertThat(service.getProgress(userId, ProgressRange.ONE_MONTH)).isEmpty();
@@ -61,7 +66,7 @@ class ProgressServiceTest {
 
     @Test
     void getProgress_noWeightOrFoodData_statsAreNullButGoalAndZeroFilledNutritionStillReturn() {
-        ProgressService service = new ProgressService(profileService, weightEntryRepository, foodEntryRepository);
+        ProgressService service = new ProgressService(profileService, weightEntryRepository, foodEntryRepository, clock);
         when(profileService.findByUserId(userId)).thenReturn(Optional.of(profileWithGoal(new BigDecimal("65.00"))));
         when(weightEntryRepository.findByUserIdAndEntryDateLessThanEqualOrderByEntryDateAsc(eq(userId), any()))
                 .thenReturn(List.of());
@@ -95,7 +100,7 @@ class ProgressServiceTest {
 
     @Test
     void getProgress_threeConsecutiveWeighIns_computesTrendChangeAndSkipsRateForShortSpan() {
-        ProgressService service = new ProgressService(profileService, weightEntryRepository, foodEntryRepository);
+        ProgressService service = new ProgressService(profileService, weightEntryRepository, foodEntryRepository, clock);
         LocalDate today = LocalDate.now();
         List<WeightEntry> weighIns = List.of(
                 new WeightEntry(userId, today.minusDays(2), new BigDecimal("80.00")),
@@ -123,7 +128,7 @@ class ProgressServiceTest {
 
     @Test
     void getProgress_fourteenDaysOfSteadyLoss_withGoalSet_producesRateAndProjection() {
-        ProgressService service = new ProgressService(profileService, weightEntryRepository, foodEntryRepository);
+        ProgressService service = new ProgressService(profileService, weightEntryRepository, foodEntryRepository, clock);
         LocalDate today = LocalDate.now();
         // 15 points spanning exactly 14 days (today-14 .. today) -> meets the 14-day rate minimum.
         List<WeightEntry> weighIns = new java.util.ArrayList<>();
@@ -148,7 +153,7 @@ class ProgressServiceTest {
 
     @Test
     void getProgress_nutritionDays_averagesAdherenceAndStreakOnlyCountLoggedDays() {
-        ProgressService service = new ProgressService(profileService, weightEntryRepository, foodEntryRepository);
+        ProgressService service = new ProgressService(profileService, weightEntryRepository, foodEntryRepository, clock);
         LocalDate today = LocalDate.now();
         LocalDate twoDaysAgo = today.minusDays(2);
         // Within the +/-10% band around the 2000 kcal target (1800-2200).
@@ -174,6 +179,38 @@ class ProgressServiceTest {
         assertThat(response.nutrition().avgProteinG()).isEqualTo(125); // (150+100)/2
         assertThat(response.nutrition().adherencePct()).isEqualTo(50.0); // 1 of 2 logged days within band
         // "today" is logged but "yesterday" (in between) is not -> streak of exactly 1.
+        assertThat(response.nutrition().loggedStreakDays()).isEqualTo(1);
+    }
+
+    /**
+     * 23:30 in America/Argentina/Buenos_Aires is already 02:30 UTC the NEXT calendar day. If
+     * {@code getProgress} ever read "today" off a UTC (or any non-Argentina) clock instead of the
+     * injected one, "today" would wrongly become 2026-09-26 and an entry logged for the user's
+     * real today (2026-09-25) would look like "yesterday" — dropping out of both the response's
+     * date range and the logged streak.
+     */
+    @Test
+    void getProgress_lateEveningInArgentinaTimezone_treatsArgentinaCalendarDayAsToday() {
+        ZoneId argentina = ZoneId.of("America/Argentina/Buenos_Aires");
+        Instant fixedInstant = LocalDateTime.of(2026, 9, 25, 23, 30).atZone(argentina).toInstant();
+        Clock argentinaClock = Clock.fixed(fixedInstant, argentina);
+        LocalDate argentinaToday = LocalDate.of(2026, 9, 25);
+
+        ProgressService service = new ProgressService(profileService, weightEntryRepository, foodEntryRepository, argentinaClock);
+        when(profileService.findByUserId(userId)).thenReturn(Optional.of(profileWithGoal(null)));
+        when(weightEntryRepository.findByUserIdAndEntryDateLessThanEqualOrderByEntryDateAsc(eq(userId), eq(argentinaToday)))
+                .thenReturn(List.of());
+        when(foodEntryRepository.findFirstByUserIdOrderByEntryDateAsc(userId)).thenReturn(Optional.empty());
+        FoodEntry loggedToday = new FoodEntry(
+                userId, argentinaToday, MealType.ALMUERZO, "Comida", new BigDecimal("100.00"), new BigDecimal("2000.00"),
+                new BigDecimal("100.00"), new BigDecimal("0.00"), new BigDecimal("0.00"), new BigDecimal("0.00"),
+                new BigDecimal("0.00"), new BigDecimal("0.00"), FoodSource.MANUAL, null, null);
+        when(foodEntryRepository.findByUserIdAndEntryDateBetweenOrderByEntryDateAsc(eq(userId), any(), eq(argentinaToday)))
+                .thenReturn(List.of(loggedToday));
+
+        ProgressResponse response = service.getProgress(userId, ProgressRange.ONE_MONTH).orElseThrow();
+
+        assertThat(response.to()).isEqualTo(argentinaToday);
         assertThat(response.nutrition().loggedStreakDays()).isEqualTo(1);
     }
 

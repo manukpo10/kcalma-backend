@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.kcalma.config.ClockConfig;
 import com.kcalma.security.SecurityConfig;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -37,11 +38,12 @@ import org.springframework.web.server.ResponseStatusException;
  * checks) carry their Spanish reason as the response's error message instead.
  */
 @WebMvcTest(WeightController.class)
-@Import(SecurityConfig.class)
+@Import({SecurityConfig.class, ClockConfig.class})
 @TestPropertySource(properties = {
     "app.security.supabase-url=https://example.supabase.co",
     "app.security.owner-user-ids=11111111-1111-1111-1111-111111111111",
-    "app.security.allowed-origins=http://localhost:5173"
+    "app.security.allowed-origins=http://localhost:5173",
+    "app.timezone=America/Argentina/Buenos_Aires"
 })
 class WeightControllerValidationTest {
 

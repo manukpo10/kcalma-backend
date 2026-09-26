@@ -14,6 +14,7 @@ import com.kcalma.progress.dto.ProgressResponse.WeightPoint;
 import com.kcalma.weight.WeightEntry;
 import com.kcalma.weight.WeightEntryRepository;
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -51,20 +52,25 @@ public class ProgressService {
     private final ProfileService profileService;
     private final WeightEntryRepository weightEntryRepository;
     private final FoodEntryRepository foodEntryRepository;
+    private final Clock clock;
     private final WeightTrendCalculator trendCalculator = new WeightTrendCalculator();
     private final LinearRegression regression = new LinearRegression();
     private final GoalProjectionCalculator projectionCalculator = new GoalProjectionCalculator();
 
     public ProgressService(
-            ProfileService profileService, WeightEntryRepository weightEntryRepository, FoodEntryRepository foodEntryRepository) {
+            ProfileService profileService,
+            WeightEntryRepository weightEntryRepository,
+            FoodEntryRepository foodEntryRepository,
+            Clock clock) {
         this.profileService = profileService;
         this.weightEntryRepository = weightEntryRepository;
         this.foodEntryRepository = foodEntryRepository;
+        this.clock = clock;
     }
 
     @Transactional(readOnly = true)
     public Optional<ProgressResponse> getProgress(UUID userId, ProgressRange range) {
-        return profileService.findByUserId(userId).map(profile -> build(userId, range, LocalDate.now(), profile));
+        return profileService.findByUserId(userId).map(profile -> build(userId, range, LocalDate.now(clock), profile));
     }
 
     private ProgressResponse build(UUID userId, ProgressRange range, LocalDate today, ProfileWithTargetsResponse profileWithTargets) {

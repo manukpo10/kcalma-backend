@@ -4,6 +4,7 @@ import com.kcalma.profile.dto.NutritionTargetsResponse;
 import com.kcalma.profile.dto.ProfileRequest;
 import com.kcalma.profile.dto.ProfileResponse;
 import com.kcalma.profile.dto.ProfileWithTargetsResponse;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.Period;
 import java.util.Optional;
@@ -15,10 +16,12 @@ import org.springframework.transaction.annotation.Transactional;
 public class ProfileService {
 
     private final UserProfileRepository repository;
+    private final Clock clock;
     private final NutritionCalculator calculator = new NutritionCalculator();
 
-    public ProfileService(UserProfileRepository repository) {
+    public ProfileService(UserProfileRepository repository, Clock clock) {
         this.repository = repository;
+        this.clock = clock;
     }
 
     @Transactional(readOnly = true)
@@ -41,7 +44,7 @@ public class ProfileService {
     }
 
     private ProfileWithTargetsResponse toResponse(UserProfile profile) {
-        int ageYears = Period.between(profile.getBirthDate(), LocalDate.now()).getYears();
+        int ageYears = Period.between(profile.getBirthDate(), LocalDate.now(clock)).getYears();
         var input = new NutritionCalculator.Input(
                 profile.getSex(),
                 ageYears,

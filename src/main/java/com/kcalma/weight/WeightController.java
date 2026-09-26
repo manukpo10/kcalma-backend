@@ -4,6 +4,7 @@ import com.kcalma.weight.dto.UpsertWeightRequest;
 import com.kcalma.weight.dto.UpsertWeightResponse;
 import com.kcalma.weight.dto.WeightEntryResponse;
 import jakarta.validation.Valid;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -26,9 +27,11 @@ import org.springframework.web.server.ResponseStatusException;
 public class WeightController {
 
     private final WeightEntryService entryService;
+    private final Clock clock;
 
-    public WeightController(WeightEntryService entryService) {
+    public WeightController(WeightEntryService entryService, Clock clock) {
         this.entryService = entryService;
+        this.clock = clock;
     }
 
     @PutMapping("/{date}")
@@ -54,7 +57,7 @@ public class WeightController {
     }
 
     private void validateNotFuture(LocalDate date) {
-        if (date.isAfter(LocalDate.now())) {
+        if (date.isAfter(LocalDate.now(clock))) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "La fecha no puede ser futura.");
         }
     }

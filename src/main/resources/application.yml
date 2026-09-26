@@ -32,6 +32,7 @@ server:
     include-binding-errors: always
 
 app:
+  timezone: ${APP_TIMEZONE:America/Argentina/Buenos_Aires}
   security:
     supabase-url: ${SUPABASE_URL}
     owner-user-ids: ${OWNER_USER_IDS:}

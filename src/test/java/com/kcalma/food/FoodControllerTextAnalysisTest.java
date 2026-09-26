@@ -2,6 +2,7 @@ package com.kcalma.food;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -12,9 +13,12 @@ import com.kcalma.food.analysis.AnalyzedFoodItem;
 import com.kcalma.food.analysis.FoodAnalysisException;
 import com.kcalma.food.analysis.FoodAnalysisResult;
 import com.kcalma.food.analysis.FoodAnalyzer;
+import com.kcalma.food.reference.FoodReferenceMatcher;
+import com.kcalma.food.reference.ResolvedFoodItem;
 import com.kcalma.security.SecurityConfig;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -59,6 +63,9 @@ class FoodControllerTextAnalysisTest {
     private FoodEntryService foodEntryService;
 
     @MockitoBean
+    private FoodReferenceMatcher foodReferenceMatcher;
+
+    @MockitoBean
     private JwtDecoder jwtDecoder;
 
     /**
@@ -101,14 +108,31 @@ class FoodControllerTextAnalysisTest {
     @Test
     void validDescription_returns200WithAnalyzedItems() throws Exception {
         when(jwtDecoder.decode(TOKEN)).thenReturn(jwtFor(OWNER_ID));
-        when(foodAnalyzer.analyzeDescription(anyString()))
-                .thenReturn(new FoodAnalysisResult(
-                        List.of(new AnalyzedFoodItem("empanada de carne", 90, 250, 9, 12, 22, 1.5, 1, 380)), null));
+        AnalyzedFoodItem item =
+                new AnalyzedFoodItem("empanada de carne", "empanada, beef, baked", 90, 250, 9, 12, 22, 1.5, 1, 380);
+        when(foodAnalyzer.analyzeDescription(anyString())).thenReturn(new FoodAnalysisResult(List.of(item), null));
+        when(foodReferenceMatcher.resolve(eq(UUID.fromString(OWNER_ID)), eq(List.of(item))))
+                .thenReturn(List.of(new ResolvedFoodItem(
+                        item.name(),
+                        item.canonicalNameEn(),
+                        item.grams(),
+                        new com.kcalma.food.NutritionMath.Per100(
+                                item.kcalPer100(),
+                                item.proteinPer100(),
+                                item.fatPer100(),
+                                item.carbsPer100(),
+                                item.fiberPer100(),
+                                item.sugarPer100(),
+                                item.sodiumMgPer100()),
+                        FoodSource.ESTIMATED,
+                        null,
+                        null)));
 
         mockMvc.perform(authenticatedPost("{\"description\": \"2 empanadas de carne\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items[0].name").value("empanada de carne"))
                 .andExpect(jsonPath("$.items[0].grams").value(90.0))
+                .andExpect(jsonPath("$.items[0].source").value("ESTIMATED"))
                 .andExpect(jsonPath("$.note").doesNotExist());
     }
 

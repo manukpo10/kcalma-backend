@@ -2,15 +2,19 @@ package com.kcalma.suggestions;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.kcalma.day.DayService;
 import com.kcalma.day.dto.DayResponse;
+import com.kcalma.food.FoodSource;
 import com.kcalma.food.MealType;
 import com.kcalma.food.NutritionMath;
 import com.kcalma.food.analysis.AnalyzedFoodItem;
+import com.kcalma.food.reference.FoodReferenceMatcher;
+import com.kcalma.food.reference.ResolvedFoodItem;
 import com.kcalma.profile.dto.NutritionTargetsResponse;
 import com.kcalma.suggestions.dto.SuggestionOptionResponse;
 import com.kcalma.suggestions.dto.SuggestionResponse;
@@ -41,6 +45,9 @@ class SuggestionServiceTest {
 
     @Mock
     private MealSuggester mealSuggester;
+
+    @Mock
+    private FoodReferenceMatcher matcher;
 
     private final UUID userId = UUID.randomUUID();
     private final LocalDate date = LocalDate.of(2026, 9, 25);
@@ -75,11 +82,13 @@ class SuggestionServiceTest {
         NutritionMath.Totals remaining = new NutritionMath.Totals(600, 40, 20, 70, 8, 15, 500);
         when(dayService.getDay(userId, date)).thenReturn(Optional.of(sampleDay(remaining)));
 
-        AnalyzedFoodItem itemA = new AnalyzedFoodItem("milanesa de carne", 150, 200, 25, 8, 6, 1, 0.5, 420);
-        AnalyzedFoodItem itemB = new AnalyzedFoodItem("ensalada mixta", 120, 40, 1.5, 2, 4, 2, 1, 50);
+        AnalyzedFoodItem itemA =
+                new AnalyzedFoodItem("milanesa de carne", "beef, ground, cooked", 150, 200, 25, 8, 6, 1, 0.5, 420);
+        AnalyzedFoodItem itemB = new AnalyzedFoodItem("ensalada mixta", "salad, mixed", 120, 40, 1.5, 2, 4, 2, 1, 50);
         SuggestedMealOption option =
                 new SuggestedMealOption("Milanesa con ensalada", "Milanesa al horno", 25, "Alta en proteína", List.of(itemA, itemB));
         when(mealSuggester.suggest(any())).thenReturn(new MealSuggestionResult(List.of(option), null));
+        when(matcher.resolve(eq(userId), eq(List.of(itemA, itemB)))).thenReturn(passthrough(List.of(itemA, itemB)));
 
         Optional<SuggestionResponse> result = newService().suggest(userId, date, MealType.CENA, null);
 
@@ -110,7 +119,28 @@ class SuggestionServiceTest {
     }
 
     private SuggestionService newService() {
-        return new SuggestionService(dayService, mealSuggester);
+        return new SuggestionService(dayService, mealSuggester, matcher);
+    }
+
+    /** Identity resolution stand-in: keeps each item's own per-100g values, tagged ESTIMATED/unmatched. */
+    private static List<ResolvedFoodItem> passthrough(List<AnalyzedFoodItem> items) {
+        return items.stream()
+                .map(item -> new ResolvedFoodItem(
+                        item.name(),
+                        item.canonicalNameEn(),
+                        item.grams(),
+                        new NutritionMath.Per100(
+                                item.kcalPer100(),
+                                item.proteinPer100(),
+                                item.fatPer100(),
+                                item.carbsPer100(),
+                                item.fiberPer100(),
+                                item.sugarPer100(),
+                                item.sodiumMgPer100()),
+                        FoodSource.ESTIMATED,
+                        null,
+                        null))
+                .toList();
     }
 
     private static DayResponse sampleDay(NutritionMath.Totals remaining) {

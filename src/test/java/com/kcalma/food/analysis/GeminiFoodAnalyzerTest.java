@@ -29,9 +29,11 @@ class GeminiFoodAnalyzerTest {
         JsonNode response = geminiEnvelope(
                 """
                 {"items":[
-                  {"name":"milanesa de carne","grams":150,"kcalPer100":250,"proteinPer100":22,\
+                  {"name":"milanesa de carne","canonicalNameEn":"beef, ground, cooked","grams":150,\
+                "kcalPer100":250,"proteinPer100":22,\
                 "fatPer100":15,"carbsPer100":8,"fiberPer100":1,"sugarPer100":0.5,"sodiumMgPer100":450},
-                  {"name":"puré de papas","grams":120,"kcalPer100":90,"proteinPer100":2,\
+                  {"name":"puré de papas","canonicalNameEn":"potatoes, mashed","grams":120,\
+                "kcalPer100":90,"proteinPer100":2,\
                 "fatPer100":2,"carbsPer100":17,"fiberPer100":1.5,"sugarPer100":1,"sodiumMgPer100":200}
                 ],"note":null}""");
 
@@ -41,6 +43,7 @@ class GeminiFoodAnalyzerTest {
         assertThat(result.items()).hasSize(2);
         AnalyzedFoodItem first = result.items().get(0);
         assertThat(first.name()).isEqualTo("milanesa de carne");
+        assertThat(first.canonicalNameEn()).isEqualTo("beef, ground, cooked");
         assertThat(first.grams()).isEqualTo(150);
         assertThat(first.kcalPer100()).isEqualTo(250);
         assertThat(first.proteinPer100()).isEqualTo(22);
@@ -137,8 +140,11 @@ class GeminiFoodAnalyzerTest {
         JsonNode itemSchema = schema.path("properties").path("items").path("items");
         assertThat(itemSchema.path("type").asText()).isEqualTo("OBJECT");
         assertThat(itemSchema.path("properties").path("kcalPer100").path("type").asText()).isEqualTo("NUMBER");
+        assertThat(itemSchema.path("properties").path("canonicalNameEn").path("type").asText()).isEqualTo("STRING");
         ArrayNode required = (ArrayNode) itemSchema.path("required");
-        assertThat(required).extracting(JsonNode::asText).contains("name", "kcalPer100", "sodiumMgPer100");
+        assertThat(required)
+                .extracting(JsonNode::asText)
+                .contains("name", "canonicalNameEn", "kcalPer100", "sodiumMgPer100");
     }
 
     private JsonNode geminiEnvelope(String candidateText) {

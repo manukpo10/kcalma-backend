@@ -24,6 +24,7 @@ public record FoodEntryResponse(
         BigDecimal sodiumMgPer100,
         NutritionMath.Totals totals,
         FoodSource source,
+        Long fdcId,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt) {
 
@@ -53,6 +54,7 @@ public record FoodEntryResponse(
                 entry.getSodiumMgPer100(),
                 totals,
                 entry.getSource(),
+                entry.getFdcId(),
                 entry.getCreatedAt(),
                 entry.getUpdatedAt());
     }

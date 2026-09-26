@@ -22,4 +22,5 @@ public record FoodEntryRequest(
         @NotNull @DecimalMin("0.0") BigDecimal fiberPer100,
         @NotNull @DecimalMin("0.0") BigDecimal sugarPer100,
         @NotNull @DecimalMin("0.0") BigDecimal sodiumMgPer100,
-        @NotNull FoodSource source) {}
+        @NotNull FoodSource source,
+        Long fdcId) {}

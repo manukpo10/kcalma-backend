@@ -130,7 +130,8 @@ class SuggestionControllerTest {
     void validRequest_returns200WithRemainingOptionsAndTotals() throws Exception {
         when(jwtDecoder.decode(TOKEN)).thenReturn(jwtFor(OWNER_ID));
         NutritionMath.Totals remaining = new NutritionMath.Totals(600, 40, 20, 70, 8, 15, 500);
-        AnalyzedFoodItem item = new AnalyzedFoodItem("milanesa de carne", 150, 200, 25, 8, 6, 1, 0.5, 420);
+        AnalyzedFoodItem item =
+                new AnalyzedFoodItem("milanesa de carne", "beef, ground, cooked", 150, 200, 25, 8, 6, 1, 0.5, 420);
         NutritionMath.Totals totals = NutritionMath.totals(new NutritionMath.Per100(200, 25, 8, 6, 1, 0.5, 420), 150);
         SuggestionOptionResponse option = new SuggestionOptionResponse(
                 "Milanesa al horno con ensalada",

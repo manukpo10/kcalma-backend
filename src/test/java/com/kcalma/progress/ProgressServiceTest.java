@@ -155,12 +155,12 @@ class ProgressServiceTest {
         FoodEntry withinTarget = new FoodEntry(
                 userId, twoDaysAgo, MealType.ALMUERZO, "Comida", new BigDecimal("100.00"), new BigDecimal("2050.00"),
                 new BigDecimal("150.00"), new BigDecimal("0.00"), new BigDecimal("0.00"), new BigDecimal("0.00"),
-                new BigDecimal("0.00"), new BigDecimal("0.00"), FoodSource.MANUAL);
+                new BigDecimal("0.00"), new BigDecimal("0.00"), FoodSource.MANUAL, null);
         // Outside the band.
         FoodEntry outsideTarget = new FoodEntry(
                 userId, today, MealType.CENA, "Comida", new BigDecimal("100.00"), new BigDecimal("1500.00"),
                 new BigDecimal("100.00"), new BigDecimal("0.00"), new BigDecimal("0.00"), new BigDecimal("0.00"),
-                new BigDecimal("0.00"), new BigDecimal("0.00"), FoodSource.MANUAL);
+                new BigDecimal("0.00"), new BigDecimal("0.00"), FoodSource.MANUAL, null);
         when(profileService.findByUserId(userId)).thenReturn(Optional.of(profileWithGoal(null)));
         when(weightEntryRepository.findByUserIdAndEntryDateLessThanEqualOrderByEntryDateAsc(eq(userId), any()))
                 .thenReturn(List.of());

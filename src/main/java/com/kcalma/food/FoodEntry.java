@@ -65,6 +65,10 @@ public class FoodEntry {
     @Column(name = "source", nullable = false, length = 10, updatable = false)
     private FoodSource source;
 
+    /** USDA FoodData Central id this entry was matched against, or {@code null} (PERSONAL match with no USDA origin, ESTIMATED, or MANUAL). */
+    @Column(name = "fdc_id", updatable = false)
+    private Long fdcId;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
@@ -90,7 +94,8 @@ public class FoodEntry {
             BigDecimal fiberPer100,
             BigDecimal sugarPer100,
             BigDecimal sodiumMgPer100,
-            FoodSource source) {
+            FoodSource source,
+            Long fdcId) {
         this.userId = userId;
         this.entryDate = entryDate;
         this.mealType = mealType;
@@ -104,6 +109,7 @@ public class FoodEntry {
         this.sugarPer100 = sugarPer100;
         this.sodiumMgPer100 = sodiumMgPer100;
         this.source = source;
+        this.fdcId = fdcId;
     }
 
     public UUID getId() {
@@ -170,6 +176,10 @@ public class FoodEntry {
 
     public FoodSource getSource() {
         return source;
+    }
+
+    public Long getFdcId() {
+        return fdcId;
     }
 
     public OffsetDateTime getCreatedAt() {

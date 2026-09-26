@@ -8,6 +8,8 @@ import com.kcalma.food.dto.FoodAnalysisResponse;
 import com.kcalma.food.dto.FoodEntryResponse;
 import com.kcalma.food.dto.SaveFoodEntriesRequest;
 import com.kcalma.food.dto.UpdateFoodEntryRequest;
+import com.kcalma.food.reference.FoodReferenceMatcher;
+import com.kcalma.food.reference.ResolvedFoodItem;
 import jakarta.validation.Valid;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -41,26 +43,37 @@ public class FoodController {
 
     private final FoodAnalyzer analyzer;
     private final FoodEntryService entryService;
+    private final FoodReferenceMatcher referenceMatcher;
 
-    public FoodController(FoodAnalyzer analyzer, FoodEntryService entryService) {
+    public FoodController(FoodAnalyzer analyzer, FoodEntryService entryService, FoodReferenceMatcher referenceMatcher) {
         this.analyzer = analyzer;
         this.entryService = entryService;
+        this.referenceMatcher = referenceMatcher;
     }
 
     @PostMapping(value = "/analyze", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<FoodAnalysisResponse> analyze(@RequestParam("image") MultipartFile image) {
+    public ResponseEntity<FoodAnalysisResponse> analyze(
+            @AuthenticationPrincipal Jwt jwt, @RequestParam("image") MultipartFile image) {
         validatePresenceAndSize(image);
         byte[] imageBytes = readBytes(image);
         ImageFormat format = detectFormat(imageBytes);
         FoodAnalysisResult result = analyzer.analyzePhoto(imageBytes, format.mimeType());
-        return ResponseEntity.ok(FoodAnalysisResponse.from(result));
+        return ResponseEntity.ok(resolveAndBuildResponse(jwt, result));
     }
 
     @PostMapping("/analyze-text")
-    public ResponseEntity<FoodAnalysisResponse> analyzeText(@RequestBody(required = false) AnalyzeTextRequest request) {
+    public ResponseEntity<FoodAnalysisResponse> analyzeText(
+            @AuthenticationPrincipal Jwt jwt, @RequestBody(required = false) AnalyzeTextRequest request) {
         String description = validateDescription(request == null ? null : request.description());
         FoodAnalysisResult result = analyzer.analyzeDescription(description);
-        return ResponseEntity.ok(FoodAnalysisResponse.from(result));
+        return ResponseEntity.ok(resolveAndBuildResponse(jwt, result));
+    }
+
+    /** Resolves every analyzed item against the caller's library/the USDA reference before it ever reaches the client. */
+    private FoodAnalysisResponse resolveAndBuildResponse(Jwt jwt, FoodAnalysisResult result) {
+        UUID userId = UUID.fromString(jwt.getSubject());
+        List<ResolvedFoodItem> resolved = referenceMatcher.resolve(userId, result.items());
+        return FoodAnalysisResponse.fromResolved(resolved, result.note());
     }
 
     @PostMapping("/entries")

@@ -48,9 +48,12 @@ public class GeminiFoodAnalyzer implements FoodAnalyzer {
 
             Para cada alimento, estimá:
             - los gramos aproximados de esa porción en el plato,
+            - su nombre canónico en inglés al estilo USDA FoodData Central (por ejemplo \
+            "strawberries, raw", "beef, ground, 80% lean, cooked"), incluyendo el método de \
+            cocción si corresponde,
             - sus valores nutricionales por cada 100 gramos, según tablas de composición de \
             alimentos estándar (kcal, proteínas, grasas, carbohidratos, fibra, azúcares y sodio \
-            en miligramos).
+            en miligramos) — se usan solo como resguardo si no se encuentra una coincidencia real.
 
             Usá nombres de alimentos en español (por ejemplo: "milanesa de carne", "puré de \
             papas", "ensalada mixta"). Si la imagen no muestra comida, o no podés reconocer \
@@ -81,9 +84,12 @@ public class GeminiFoodAnalyzer implements FoodAnalyzer {
 
             Para cada alimento, estimá:
             - los gramos aproximados de esa porción,
+            - su nombre canónico en inglés al estilo USDA FoodData Central (por ejemplo \
+            "strawberries, raw", "beef, ground, 80%% lean, cooked"), incluyendo el método de \
+            cocción si corresponde,
             - sus valores nutricionales por cada 100 gramos, según tablas de composición de \
             alimentos estándar (kcal, proteínas, grasas, carbohidratos, fibra, azúcares y sodio \
-            en miligramos).
+            en miligramos) — se usan solo como resguardo si no se encuentra una coincidencia real.
 
             Usá nombres de alimentos en español (por ejemplo: "milanesa de carne", "puré de \
             papas", "ensalada mixta"). Si el texto no describe comida, o no podés reconocer \
@@ -195,11 +201,12 @@ public class GeminiFoodAnalyzer implements FoodAnalyzer {
 
         ObjectNode itemProperties = objectMapper.createObjectNode();
         itemProperties.set("name", typeNode("STRING"));
+        itemProperties.set("canonicalNameEn", typeNode("STRING"));
         for (String field : numberFields) {
             itemProperties.set(field, typeNode("NUMBER"));
         }
 
-        ArrayNode itemRequired = objectMapper.createArrayNode().add("name");
+        ArrayNode itemRequired = objectMapper.createArrayNode().add("name").add("canonicalNameEn");
         for (String field : numberFields) {
             itemRequired.add(field);
         }
@@ -250,6 +257,7 @@ public class GeminiFoodAnalyzer implements FoodAnalyzer {
         for (JsonNode item : parsed.path("items")) {
             items.add(new AnalyzedFoodItem(
                     item.path("name").asText(""),
+                    item.path("canonicalNameEn").asText(""),
                     item.path("grams").asDouble(0),
                     item.path("kcalPer100").asDouble(0),
                     item.path("proteinPer100").asDouble(0),

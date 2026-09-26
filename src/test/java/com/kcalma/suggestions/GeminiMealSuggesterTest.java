@@ -99,8 +99,11 @@ class GeminiMealSuggesterTest {
 
         JsonNode itemSchema = optionSchema.path("properties").path("items").path("items");
         assertThat(itemSchema.path("properties").path("kcalPer100").path("type").asText()).isEqualTo("NUMBER");
+        assertThat(itemSchema.path("properties").path("canonicalNameEn").path("type").asText()).isEqualTo("STRING");
         ArrayNode itemRequired = (ArrayNode) itemSchema.path("required");
-        assertThat(itemRequired).extracting(JsonNode::asText).contains("name", "grams", "kcalPer100");
+        assertThat(itemRequired)
+                .extracting(JsonNode::asText)
+                .contains("name", "canonicalNameEn", "grams", "kcalPer100");
 
         ArrayNode rootRequired = (ArrayNode) schema.path("required");
         assertThat(rootRequired).extracting(JsonNode::asText).contains("options");
@@ -114,9 +117,11 @@ class GeminiMealSuggesterTest {
                   {"title":"Milanesa al horno con ensalada","description":"Milanesa de carne al horno con \
                 ensalada mixta","prepMinutes":25,"why":"Alta en proteína para llegar a tu objetivo del día",\
                 "items":[
-                    {"name":"milanesa de carne","grams":150,"kcalPer100":200,"proteinPer100":25,"fatPer100":8,\
+                    {"name":"milanesa de carne","canonicalNameEn":"beef, ground, cooked","grams":150,\
+                "kcalPer100":200,"proteinPer100":25,"fatPer100":8,\
                 "carbsPer100":6,"fiberPer100":1,"sugarPer100":0.5,"sodiumMgPer100":420},
-                    {"name":"ensalada mixta","grams":120,"kcalPer100":40,"proteinPer100":1.5,"fatPer100":2,\
+                    {"name":"ensalada mixta","canonicalNameEn":"salad, mixed","grams":120,\
+                "kcalPer100":40,"proteinPer100":1.5,"fatPer100":2,\
                 "carbsPer100":4,"fiberPer100":2,"sugarPer100":1,"sodiumMgPer100":50}
                   ]}
                 ],"note":null}""");
@@ -131,6 +136,7 @@ class GeminiMealSuggesterTest {
         assertThat(option.why()).contains("proteína");
         assertThat(option.items()).hasSize(2);
         assertThat(option.items().get(0).name()).isEqualTo("milanesa de carne");
+        assertThat(option.items().get(0).canonicalNameEn()).isEqualTo("beef, ground, cooked");
         assertThat(option.items().get(0).grams()).isEqualTo(150);
         assertThat(option.items().get(0).kcalPer100()).isEqualTo(200);
     }

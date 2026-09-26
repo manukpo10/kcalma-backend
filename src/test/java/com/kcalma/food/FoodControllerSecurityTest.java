@@ -5,6 +5,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.kcalma.food.analysis.FoodAnalyzer;
+import com.kcalma.food.reference.FoodReferenceMatcher;
 import com.kcalma.security.SecurityConfig;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -46,6 +47,9 @@ class FoodControllerSecurityTest {
 
     @MockitoBean
     private FoodEntryService foodEntryService;
+
+    @MockitoBean
+    private FoodReferenceMatcher foodReferenceMatcher;
 
     @MockitoBean
     private JwtDecoder jwtDecoder;

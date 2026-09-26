@@ -15,6 +15,6 @@ public interface WeightEntryRepository extends JpaRepository<WeightEntry, UUID> 
     /** All of a user's weigh-ins up to (and including) a date, oldest first — the input the trend is computed from. */
     List<WeightEntry> findByUserIdAndEntryDateLessThanEqualOrderByEntryDateAsc(UUID userId, LocalDate to);
 
-    /** Used to decide whether an upserted weigh-in is the most recent one (see WeightEntryService). */
-    Optional<WeightEntry> findFirstByUserIdOrderByEntryDateDesc(UUID userId);
+    /** Every one of a user's weigh-ins, oldest first — the full series {@code WeightTrendCalculator} smooths (see WeightEntryService). */
+    List<WeightEntry> findByUserIdOrderByEntryDateAsc(UUID userId);
 }

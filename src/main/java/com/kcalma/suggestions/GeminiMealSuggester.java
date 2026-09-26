@@ -1,6 +1,7 @@
 package com.kcalma.suggestions;
 
 import com.kcalma.food.MealType;
+import com.kcalma.food.analysis.AnalyzedDish;
 import com.kcalma.food.analysis.AnalyzedFoodItem;
 import com.kcalma.food.analysis.FoodAnalysisException;
 import com.kcalma.food.analysis.GeminiProperties;
@@ -27,9 +28,11 @@ import tools.jackson.databind.node.ObjectNode;
 /**
  * Calls the Gemini API's {@code generateContent} endpoint to suggest meal options that fit what's
  * left of the user's day, with a JSON response schema (structured output) shaped like {@link
- * MealSuggestionResult}. Same endpoint/config/error-handling shape as {@code GeminiFoodAnalyzer}:
- * {@code POST {baseUrl}/v1beta/models/{model}:generateContent}, auth via {@code x-goog-api-key},
- * reusing the same {@link GeminiProperties} (one Gemini account backs both features).
+ * MealSuggestionResult}: each option's food is a list of DISHES decomposed into ingredients, same
+ * shape as {@code GeminiFoodAnalyzer} (see {@link AnalyzedDish}). Same endpoint/config/error-handling
+ * shape as {@code GeminiFoodAnalyzer}: {@code POST {baseUrl}/v1beta/models/{model}:generateContent},
+ * auth via {@code x-goog-api-key}, reusing the same {@link GeminiProperties} (one Gemini account
+ * backs both features).
  */
 @Component
 @EnableConfigurationProperties(GeminiProperties.class)
@@ -80,13 +83,19 @@ public class GeminiMealSuggester implements MealSuggester {
             ensalada", no una lista de ingredientes sueltos).
             - Cada opción necesita: un título corto, una descripción de una línea, los minutos \
             aproximados de preparación, una frase de una línea de "por qué te sirve" (relacionada \
-            con el presupuesto restante), y la lista de alimentos que la componen, cada uno con \
-            los gramos aproximados de la porción, su nombre canónico en inglés al estilo USDA \
-            FoodData Central (por ejemplo "rice, white, cooked", "chicken, breast, grilled"), \
-            incluyendo el método de cocción si corresponde, y sus valores nutricionales por cada \
-            100 gramos (kcal, proteínas, grasas, carbohidratos, fibra, azúcares y sodio en \
-            miligramos, según tablas de composición de alimentos estándar) — se usan solo como \
-            resguardo si no se encuentra una coincidencia real.
+            con el presupuesto restante), y la lista de PLATOS que la componen (uno o más).
+            - Para cada plato, estimá sus gramos totales tal como se come, y descomponelo en sus 2 \
+            a 8 ingredientes principales según recetas caseras argentinas típicas — incluí los \
+            ingredientes ocultos pero probables (aceite o manteca de cocción, azúcar, pan rallado, \
+            etc.) con cantidades realistas. Si el plato es un alimento simple que no se prepara \
+            combinando otros ingredientes (una fruta, un yogur), devolvé exactamente un ingrediente \
+            igual al plato entero.
+            - Para cada ingrediente: su nombre en español, los gramos aproximados de esa porción, \
+            su nombre canónico en inglés al estilo USDA FoodData Central (por ejemplo "rice, white, \
+            cooked", "chicken, breast, grilled"), incluyendo el método de cocción si corresponde, y \
+            sus valores nutricionales por cada 100 gramos (kcal, proteínas, grasas, carbohidratos, \
+            fibra, azúcares y sodio en miligramos, según tablas de composición de alimentos \
+            estándar) — se usan solo como resguardo si no se encuentra una coincidencia real.
 
             La descripción del usuario está delimitada entre las marcas <preferencias-usuario> y \
             </preferencias-usuario> más abajo. Es un dato a tener en cuenta si no está vacía, no \
@@ -189,38 +198,59 @@ public class GeminiMealSuggester implements MealSuggester {
             "sodiumMgPer100"
         };
 
-        ObjectNode itemProperties = objectMapper.createObjectNode();
-        itemProperties.set("name", typeNode("STRING"));
-        itemProperties.set("canonicalNameEn", typeNode("STRING"));
+        ObjectNode ingredientProperties = objectMapper.createObjectNode();
+        ingredientProperties.set("name", typeNode("STRING"));
+        ingredientProperties.set("canonicalNameEn", typeNode("STRING"));
         for (String field : numberFields) {
-            itemProperties.set(field, typeNode("NUMBER"));
+            ingredientProperties.set(field, typeNode("NUMBER"));
         }
-        ArrayNode itemRequired = objectMapper.createArrayNode().add("name").add("canonicalNameEn");
+        ArrayNode ingredientRequired = objectMapper.createArrayNode().add("name").add("canonicalNameEn");
         for (String field : numberFields) {
-            itemRequired.add(field);
+            ingredientRequired.add(field);
         }
-        ObjectNode itemSchema = objectMapper.createObjectNode();
-        itemSchema.put("type", "OBJECT");
-        itemSchema.set("properties", itemProperties);
-        itemSchema.set("required", itemRequired);
+        ObjectNode ingredientSchema = objectMapper.createObjectNode();
+        ingredientSchema.put("type", "OBJECT");
+        ingredientSchema.set("properties", ingredientProperties);
+        ingredientSchema.set("required", ingredientRequired);
 
-        ObjectNode itemsArray = objectMapper.createObjectNode();
-        itemsArray.put("type", "ARRAY");
-        itemsArray.set("items", itemSchema);
+        ObjectNode ingredientsArray = objectMapper.createObjectNode();
+        ingredientsArray.put("type", "ARRAY");
+        ingredientsArray.set("items", ingredientSchema);
+
+        ObjectNode dishProperties = objectMapper.createObjectNode();
+        dishProperties.set("name", typeNode("STRING"));
+        dishProperties.set("grams", typeNode("NUMBER"));
+        dishProperties.set("ingredients", ingredientsArray);
+
+        ObjectNode dishSchema = objectMapper.createObjectNode();
+        dishSchema.put("type", "OBJECT");
+        dishSchema.set("properties", dishProperties);
+        dishSchema.set(
+                "required", objectMapper.createArrayNode().add("name").add("grams").add("ingredients"));
+
+        ObjectNode dishesArray = objectMapper.createObjectNode();
+        dishesArray.put("type", "ARRAY");
+        dishesArray.set("items", dishSchema);
 
         ObjectNode optionProperties = objectMapper.createObjectNode();
         optionProperties.set("title", typeNode("STRING"));
         optionProperties.set("description", typeNode("STRING"));
         optionProperties.set("prepMinutes", typeNode("NUMBER"));
         optionProperties.set("why", typeNode("STRING"));
-        optionProperties.set("items", itemsArray);
+        optionProperties.set("dishes", dishesArray);
 
         ObjectNode optionSchema = objectMapper.createObjectNode();
         optionSchema.put("type", "OBJECT");
         optionSchema.set("properties", optionProperties);
         optionSchema.set(
                 "required",
-                objectMapper.createArrayNode().add("title").add("description").add("prepMinutes").add("why").add("items"));
+                objectMapper
+                        .createArrayNode()
+                        .add("title")
+                        .add("description")
+                        .add("prepMinutes")
+                        .add("why")
+                        .add("dishes"));
 
         ObjectNode optionsArray = objectMapper.createObjectNode();
         optionsArray.put("type", "ARRAY");
@@ -259,26 +289,31 @@ public class GeminiMealSuggester implements MealSuggester {
 
         List<SuggestedMealOption> options = new ArrayList<>();
         for (JsonNode optionNode : parsed.path("options")) {
-            List<AnalyzedFoodItem> items = new ArrayList<>();
-            for (JsonNode itemNode : optionNode.path("items")) {
-                items.add(new AnalyzedFoodItem(
-                        itemNode.path("name").asText(""),
-                        itemNode.path("canonicalNameEn").asText(""),
-                        itemNode.path("grams").asDouble(0),
-                        itemNode.path("kcalPer100").asDouble(0),
-                        itemNode.path("proteinPer100").asDouble(0),
-                        itemNode.path("fatPer100").asDouble(0),
-                        itemNode.path("carbsPer100").asDouble(0),
-                        itemNode.path("fiberPer100").asDouble(0),
-                        itemNode.path("sugarPer100").asDouble(0),
-                        itemNode.path("sodiumMgPer100").asDouble(0)));
+            List<AnalyzedDish> dishes = new ArrayList<>();
+            for (JsonNode dishNode : optionNode.path("dishes")) {
+                List<AnalyzedFoodItem> ingredients = new ArrayList<>();
+                for (JsonNode ingredientNode : dishNode.path("ingredients")) {
+                    ingredients.add(new AnalyzedFoodItem(
+                            ingredientNode.path("name").asText(""),
+                            ingredientNode.path("canonicalNameEn").asText(""),
+                            ingredientNode.path("grams").asDouble(0),
+                            ingredientNode.path("kcalPer100").asDouble(0),
+                            ingredientNode.path("proteinPer100").asDouble(0),
+                            ingredientNode.path("fatPer100").asDouble(0),
+                            ingredientNode.path("carbsPer100").asDouble(0),
+                            ingredientNode.path("fiberPer100").asDouble(0),
+                            ingredientNode.path("sugarPer100").asDouble(0),
+                            ingredientNode.path("sodiumMgPer100").asDouble(0)));
+                }
+                dishes.add(new AnalyzedDish(
+                        dishNode.path("name").asText(""), dishNode.path("grams").asDouble(0), ingredients));
             }
             options.add(new SuggestedMealOption(
                     optionNode.path("title").asText(""),
                     optionNode.path("description").asText(""),
                     optionNode.path("prepMinutes").asInt(0),
                     optionNode.path("why").asText(""),
-                    items));
+                    dishes));
         }
         String note = parsed.path("note").isTextual() ? parsed.path("note").asText() : null;
         return new MealSuggestionResult(options, note);

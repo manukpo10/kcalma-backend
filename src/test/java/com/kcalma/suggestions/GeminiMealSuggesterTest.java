@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.kcalma.food.MealType;
 import com.kcalma.food.NutritionMath;
+import com.kcalma.food.analysis.AnalyzedDish;
 import com.kcalma.food.analysis.FoodAnalysisException;
 import com.kcalma.food.analysis.GeminiProperties;
 import org.junit.jupiter.api.Test;
@@ -17,7 +18,8 @@ import tools.jackson.databind.node.ObjectNode;
 /**
  * Unit tests for {@link GeminiMealSuggester}'s request building and response parsing, mirroring
  * {@code GeminiFoodAnalyzerTest}. No real HTTP call is made: only the pure {@code
- * buildRequestBody}/{@code buildResponseSchema}/{@code parseResponse} steps are exercised.
+ * buildRequestBody}/{@code buildResponseSchema}/{@code parseResponse} steps are exercised. Each
+ * option's food is a list of DISHES decomposed into ingredients, same shape as the analyze flow.
  */
 class GeminiMealSuggesterTest {
 
@@ -40,6 +42,7 @@ class GeminiMealSuggesterTest {
         assertThat(text).contains("9");
         assertThat(text).contains("23");
         assertThat(text).contains("890");
+        assertThat(text).containsIgnoringCase("platos");
 
         JsonNode generationConfig = body.path("generationConfig");
         assertThat(generationConfig.path("responseMimeType").asText()).isEqualTo("application/json");
@@ -88,7 +91,7 @@ class GeminiMealSuggesterTest {
     }
 
     @Test
-    void buildResponseSchema_declaresOptionsArrayWithItemsAndNullableNote() {
+    void buildResponseSchema_declaresOptionsArrayWithNestedDishesAndIngredientsAndNullableNote() {
         ObjectNode schema = suggester.buildResponseSchema();
 
         assertThat(schema.path("type").asText()).isEqualTo("OBJECT");
@@ -97,11 +100,16 @@ class GeminiMealSuggesterTest {
         assertThat(optionSchema.path("properties").path("title").path("type").asText()).isEqualTo("STRING");
         assertThat(optionSchema.path("properties").path("prepMinutes").path("type").asText()).isEqualTo("NUMBER");
 
-        JsonNode itemSchema = optionSchema.path("properties").path("items").path("items");
-        assertThat(itemSchema.path("properties").path("kcalPer100").path("type").asText()).isEqualTo("NUMBER");
-        assertThat(itemSchema.path("properties").path("canonicalNameEn").path("type").asText()).isEqualTo("STRING");
-        ArrayNode itemRequired = (ArrayNode) itemSchema.path("required");
-        assertThat(itemRequired)
+        JsonNode dishSchema = optionSchema.path("properties").path("dishes").path("items");
+        assertThat(dishSchema.path("type").asText()).isEqualTo("OBJECT");
+        assertThat(dishSchema.path("properties").path("grams").path("type").asText()).isEqualTo("NUMBER");
+
+        JsonNode ingredientSchema = dishSchema.path("properties").path("ingredients").path("items");
+        assertThat(ingredientSchema.path("properties").path("kcalPer100").path("type").asText()).isEqualTo("NUMBER");
+        assertThat(ingredientSchema.path("properties").path("canonicalNameEn").path("type").asText())
+                .isEqualTo("STRING");
+        ArrayNode ingredientRequired = (ArrayNode) ingredientSchema.path("required");
+        assertThat(ingredientRequired)
                 .extracting(JsonNode::asText)
                 .contains("name", "canonicalNameEn", "grams", "kcalPer100");
 
@@ -110,19 +118,23 @@ class GeminiMealSuggesterTest {
     }
 
     @Test
-    void parseResponse_extractsOptionsAndItemsFromCandidateText() {
+    void parseResponse_extractsOptionsDishesAndIngredientsFromCandidateText() {
         JsonNode response = geminiEnvelope(
                 """
                 {"options":[
                   {"title":"Milanesa al horno con ensalada","description":"Milanesa de carne al horno con \
                 ensalada mixta","prepMinutes":25,"why":"Alta en proteína para llegar a tu objetivo del día",\
-                "items":[
-                    {"name":"milanesa de carne","canonicalNameEn":"beef, ground, cooked","grams":150,\
+                "dishes":[
+                    {"name":"milanesa al horno","grams":150,"ingredients":[
+                      {"name":"carne","canonicalNameEn":"beef, ground, cooked","grams":150,\
                 "kcalPer100":200,"proteinPer100":25,"fatPer100":8,\
-                "carbsPer100":6,"fiberPer100":1,"sugarPer100":0.5,"sodiumMgPer100":420},
-                    {"name":"ensalada mixta","canonicalNameEn":"salad, mixed","grams":120,\
+                "carbsPer100":6,"fiberPer100":1,"sugarPer100":0.5,"sodiumMgPer100":420}
+                    ]},
+                    {"name":"ensalada mixta","grams":120,"ingredients":[
+                      {"name":"ensalada mixta","canonicalNameEn":"salad, mixed","grams":120,\
                 "kcalPer100":40,"proteinPer100":1.5,"fatPer100":2,\
                 "carbsPer100":4,"fiberPer100":2,"sugarPer100":1,"sodiumMgPer100":50}
+                    ]}
                   ]}
                 ],"note":null}""");
 
@@ -134,11 +146,15 @@ class GeminiMealSuggesterTest {
         assertThat(option.title()).isEqualTo("Milanesa al horno con ensalada");
         assertThat(option.prepMinutes()).isEqualTo(25);
         assertThat(option.why()).contains("proteína");
-        assertThat(option.items()).hasSize(2);
-        assertThat(option.items().get(0).name()).isEqualTo("milanesa de carne");
-        assertThat(option.items().get(0).canonicalNameEn()).isEqualTo("beef, ground, cooked");
-        assertThat(option.items().get(0).grams()).isEqualTo(150);
-        assertThat(option.items().get(0).kcalPer100()).isEqualTo(200);
+        assertThat(option.dishes()).hasSize(2);
+
+        AnalyzedDish milanesa = option.dishes().get(0);
+        assertThat(milanesa.name()).isEqualTo("milanesa al horno");
+        assertThat(milanesa.ingredients()).hasSize(1);
+        assertThat(milanesa.ingredients().get(0).name()).isEqualTo("carne");
+        assertThat(milanesa.ingredients().get(0).canonicalNameEn()).isEqualTo("beef, ground, cooked");
+        assertThat(milanesa.ingredients().get(0).grams()).isEqualTo(150);
+        assertThat(milanesa.ingredients().get(0).kcalPer100()).isEqualTo(200);
     }
 
     @Test

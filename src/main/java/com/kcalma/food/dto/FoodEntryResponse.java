@@ -7,6 +7,7 @@ import com.kcalma.food.NutritionMath;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 public record FoodEntryResponse(
@@ -25,6 +26,8 @@ public record FoodEntryResponse(
         NutritionMath.Totals totals,
         FoodSource source,
         Long fdcId,
+        /** {@code null} for any entry logged before ingredient breakdowns shipped (V9). */
+        List<FoodEntryIngredientResponse> ingredients,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt) {
 
@@ -38,6 +41,9 @@ public record FoodEntryResponse(
                 entry.getSugarPer100().doubleValue(),
                 entry.getSodiumMgPer100().doubleValue());
         NutritionMath.Totals totals = NutritionMath.totals(per100, entry.getGrams().doubleValue());
+        List<FoodEntryIngredientResponse> ingredients = entry.getIngredients() == null
+                ? null
+                : entry.getIngredients().stream().map(FoodEntryIngredientResponse::from).toList();
 
         return new FoodEntryResponse(
                 entry.getId(),
@@ -55,6 +61,7 @@ public record FoodEntryResponse(
                 totals,
                 entry.getSource(),
                 entry.getFdcId(),
+                ingredients,
                 entry.getCreatedAt(),
                 entry.getUpdatedAt());
     }

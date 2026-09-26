@@ -1,26 +1,20 @@
 package com.kcalma.food.dto;
 
+import com.kcalma.food.FoodEntryIngredient;
 import com.kcalma.food.FoodSource;
-import com.kcalma.food.MealType;
-import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.math.BigDecimal;
-import java.time.LocalDate;
-import java.util.List;
 
 /**
- * One DISH inside a POST /api/food/entries batch — from a confirmed photo/text analysis or manual
- * add. {@code kcalPer100}..{@code sodiumMgPer100} are the dish's own derived per-100g values (see
- * {@code com.kcalma.food.reference.ResolvedDish}). {@code ingredients} is optional: a client that
- * doesn't send a breakdown yet gets a single synthetic ingredient equal to the dish itself (see
- * {@code FoodEntryService}), so every entry saved from here on always has one.
+ * One ingredient inside a POST /api/food/entries dish, or inside the optional {@code ingredients}
+ * PATCH edit on a saved entry (see {@link UpdateFoodEntryRequest}) — the already-resolved
+ * per-100g values/source/fdcId, same shape persisted in {@code food_entry.ingredients} (see
+ * {@link FoodEntryIngredient}).
  */
-public record FoodEntryRequest(
-        @NotNull LocalDate entryDate,
-        @NotNull MealType mealType,
+public record FoodEntryIngredientRequest(
         @NotBlank String name,
         @NotNull @DecimalMin(value = "0.1") @DecimalMax(value = "5000") BigDecimal grams,
         @NotNull @DecimalMin("0.0") BigDecimal kcalPer100,
@@ -31,5 +25,11 @@ public record FoodEntryRequest(
         @NotNull @DecimalMin("0.0") BigDecimal sugarPer100,
         @NotNull @DecimalMin("0.0") BigDecimal sodiumMgPer100,
         @NotNull FoodSource source,
-        Long fdcId,
-        @Valid List<FoodEntryIngredientRequest> ingredients) {}
+        Long fdcId) {
+
+    public FoodEntryIngredient toIngredient() {
+        return new FoodEntryIngredient(
+                name, grams, kcalPer100, proteinPer100, fatPer100, carbsPer100, fiberPer100, sugarPer100,
+                sodiumMgPer100, source, fdcId);
+    }
+}

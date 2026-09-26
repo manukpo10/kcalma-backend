@@ -3,9 +3,9 @@ package com.kcalma.suggestions;
 import com.kcalma.day.DayService;
 import com.kcalma.food.MealType;
 import com.kcalma.food.NutritionMath;
-import com.kcalma.food.dto.AnalyzedItemResponse;
+import com.kcalma.food.dto.AnalyzedDishResponse;
 import com.kcalma.food.reference.FoodReferenceMatcher;
-import com.kcalma.food.reference.ResolvedFoodItem;
+import com.kcalma.food.reference.ResolvedDish;
 import com.kcalma.suggestions.dto.SuggestionOptionResponse;
 import com.kcalma.suggestions.dto.SuggestionResponse;
 import java.time.LocalDate;
@@ -52,11 +52,11 @@ public class SuggestionService {
     }
 
     private SuggestionOptionResponse toOptionResponse(UUID userId, SuggestedMealOption option) {
-        List<ResolvedFoodItem> resolvedItems = referenceMatcher.resolve(userId, option.items());
-        List<AnalyzedItemResponse> items = resolvedItems.stream().map(AnalyzedItemResponse::from).toList();
-        NutritionMath.Totals totals = resolvedItems.stream()
-                .map(item -> NutritionMath.totals(item.per100(), item.grams()))
+        List<ResolvedDish> resolvedDishes = referenceMatcher.resolveDishes(userId, option.dishes());
+        List<AnalyzedDishResponse> dishes = resolvedDishes.stream().map(AnalyzedDishResponse::from).toList();
+        NutritionMath.Totals totals = resolvedDishes.stream()
+                .map(ResolvedDish::totals)
                 .reduce(NutritionMath.Totals.ZERO, NutritionMath.Totals::plus);
-        return new SuggestionOptionResponse(option.title(), option.description(), option.prepMinutes(), option.why(), items, totals);
+        return new SuggestionOptionResponse(option.title(), option.description(), option.prepMinutes(), option.why(), dishes, totals);
     }
 }

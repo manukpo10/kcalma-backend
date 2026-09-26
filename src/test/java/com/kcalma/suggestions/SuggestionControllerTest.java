@@ -6,10 +6,14 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.kcalma.food.FoodSource;
 import com.kcalma.food.MealType;
 import com.kcalma.food.NutritionMath;
 import com.kcalma.food.analysis.AnalyzedFoodItem;
 import com.kcalma.food.analysis.FoodAnalysisException;
+import com.kcalma.food.dto.AnalyzedDishResponse;
+import com.kcalma.food.reference.ResolvedDish;
+import com.kcalma.food.reference.ResolvedFoodItem;
 import com.kcalma.security.SecurityConfig;
 import com.kcalma.suggestions.dto.SuggestionOptionResponse;
 import com.kcalma.suggestions.dto.SuggestionResponse;
@@ -132,14 +136,24 @@ class SuggestionControllerTest {
         NutritionMath.Totals remaining = new NutritionMath.Totals(600, 40, 20, 70, 8, 15, 500);
         AnalyzedFoodItem item =
                 new AnalyzedFoodItem("milanesa de carne", "beef, ground, cooked", 150, 200, 25, 8, 6, 1, 0.5, 420);
-        NutritionMath.Totals totals = NutritionMath.totals(new NutritionMath.Per100(200, 25, 8, 6, 1, 0.5, 420), 150);
+        ResolvedFoodItem resolvedItem = new ResolvedFoodItem(
+                item.name(),
+                item.canonicalNameEn(),
+                item.grams(),
+                new NutritionMath.Per100(
+                        item.kcalPer100(), item.proteinPer100(), item.fatPer100(), item.carbsPer100(),
+                        item.fiberPer100(), item.sugarPer100(), item.sodiumMgPer100()),
+                FoodSource.ESTIMATED,
+                null,
+                null);
+        ResolvedDish resolvedDish = ResolvedDish.aggregate("milanesa de carne", 150, List.of(resolvedItem));
         SuggestionOptionResponse option = new SuggestionOptionResponse(
                 "Milanesa al horno con ensalada",
                 "Milanesa de carne al horno con ensalada mixta",
                 25,
                 "Alta en proteína para llegar a tu objetivo del día",
-                List.of(com.kcalma.food.dto.AnalyzedItemResponse.from(item)),
-                totals);
+                List.of(AnalyzedDishResponse.from(resolvedDish)),
+                resolvedDish.totals());
         when(suggestionService.suggest(UUID.fromString(OWNER_ID), LocalDate.parse("2026-09-25"), MealType.CENA, "tengo pollo"))
                 .thenReturn(Optional.of(new SuggestionResponse(remaining, List.of(option), null)));
 
@@ -149,8 +163,9 @@ class SuggestionControllerTest {
                 .andExpect(jsonPath("$.remaining.kcal").value(600))
                 .andExpect(jsonPath("$.options[0].title").value("Milanesa al horno con ensalada"))
                 .andExpect(jsonPath("$.options[0].prepMinutes").value(25))
-                .andExpect(jsonPath("$.options[0].items[0].name").value("milanesa de carne"))
-                .andExpect(jsonPath("$.options[0].totals.kcal").value(totals.kcal()))
+                .andExpect(jsonPath("$.options[0].dishes[0].name").value("milanesa de carne"))
+                .andExpect(jsonPath("$.options[0].dishes[0].ingredients[0].name").value("milanesa de carne"))
+                .andExpect(jsonPath("$.options[0].totals.kcal").value(resolvedDish.totals().kcal()))
                 .andExpect(jsonPath("$.note").doesNotExist());
     }
 

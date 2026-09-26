@@ -59,4 +59,35 @@ class NutritionMathTest {
 
         assertThat(remaining).isEqualTo(new Totals(-200, 10, -10, -10, 10, -10, 200));
     }
+
+    @Test
+    void per100FromTotals_isTheInverseOfTotals_roundTripsAtHundredGrams() {
+        // At exactly 100g, totals() rounds per100 to whole units — so feeding those same whole
+        // totals back through the inverse at 100g must return exactly them (no more rounding).
+        Totals totals = new Totals(157, 12, 8, 20, 3, 5, 210);
+
+        Per100 per100 = NutritionMath.per100FromTotals(totals, 100);
+
+        assertThat(per100).isEqualTo(new Per100(157, 12, 8, 20, 3, 5, 210));
+    }
+
+    @Test
+    void per100FromTotals_scalesTotalsUpToHundredGrams() {
+        // A 150g dish totalling 300 kcal is 200 kcal per 100g — the inverse of totals_scalesPer100ValuesByGramsOverOneHundred.
+        Totals totals = new Totals(300, 30, 15, 38, 6, 12, 450);
+
+        Per100 per100 = NutritionMath.per100FromTotals(totals, 150);
+
+        assertThat(per100.kcal()).isEqualTo(200);
+        assertThat(per100.protein()).isEqualTo(20);
+        assertThat(per100.fat()).isEqualTo(10);
+    }
+
+    @Test
+    void per100FromTotals_zeroOrNegativeGrams_isZeroInsteadOfDividingByZero() {
+        Totals totals = new Totals(300, 30, 15, 38, 6, 12, 450);
+
+        assertThat(NutritionMath.per100FromTotals(totals, 0)).isEqualTo(new Per100(0, 0, 0, 0, 0, 0, 0));
+        assertThat(NutritionMath.per100FromTotals(totals, -5)).isEqualTo(new Per100(0, 0, 0, 0, 0, 0, 0));
+    }
 }

@@ -12,8 +12,10 @@ import com.kcalma.day.dto.DayResponse;
 import com.kcalma.food.FoodSource;
 import com.kcalma.food.MealType;
 import com.kcalma.food.NutritionMath;
+import com.kcalma.food.analysis.AnalyzedDish;
 import com.kcalma.food.analysis.AnalyzedFoodItem;
 import com.kcalma.food.reference.FoodReferenceMatcher;
+import com.kcalma.food.reference.ResolvedDish;
 import com.kcalma.food.reference.ResolvedFoodItem;
 import com.kcalma.profile.dto.NutritionTargetsResponse;
 import com.kcalma.suggestions.dto.SuggestionOptionResponse;
@@ -33,9 +35,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 /**
  * Unit test for {@link SuggestionService}: reuses {@link DayService} for the remaining budget
  * (never trusts client-sent numbers), forwards it plus meal type/preferences to the {@link
- * MealSuggester} port, and computes each option's totals from its items via {@link
- * NutritionMath} — ignoring anything the model might have claimed as a total, since the port's
- * own data model ({@link SuggestedMealOption}) has no such field to begin with.
+ * MealSuggester} port, and computes each option's totals from its dishes' resolved ingredients via
+ * {@link NutritionMath} — ignoring anything the model might have claimed as a total, since the
+ * port's own data model ({@link SuggestedMealOption}) has no such field to begin with.
  */
 @ExtendWith(MockitoExtension.class)
 class SuggestionServiceTest {
@@ -78,17 +80,23 @@ class SuggestionServiceTest {
     }
 
     @Test
-    void suggest_computesEachOptionsTotalsFromItsItemsViaNutritionMath() {
+    void suggest_computesEachOptionsTotalsFromItsDishesResolvedIngredientsViaNutritionMath() {
         NutritionMath.Totals remaining = new NutritionMath.Totals(600, 40, 20, 70, 8, 15, 500);
         when(dayService.getDay(userId, date)).thenReturn(Optional.of(sampleDay(remaining)));
 
-        AnalyzedFoodItem itemA =
+        AnalyzedFoodItem milanesaIngredient =
                 new AnalyzedFoodItem("milanesa de carne", "beef, ground, cooked", 150, 200, 25, 8, 6, 1, 0.5, 420);
-        AnalyzedFoodItem itemB = new AnalyzedFoodItem("ensalada mixta", "salad, mixed", 120, 40, 1.5, 2, 4, 2, 1, 50);
-        SuggestedMealOption option =
-                new SuggestedMealOption("Milanesa con ensalada", "Milanesa al horno", 25, "Alta en proteína", List.of(itemA, itemB));
+        AnalyzedFoodItem ensaladaIngredient =
+                new AnalyzedFoodItem("ensalada mixta", "salad, mixed", 120, 40, 1.5, 2, 4, 2, 1, 50);
+        AnalyzedDish milanesaDish = new AnalyzedDish("milanesa de carne", 150, List.of(milanesaIngredient));
+        AnalyzedDish ensaladaDish = new AnalyzedDish("ensalada mixta", 120, List.of(ensaladaIngredient));
+        SuggestedMealOption option = new SuggestedMealOption(
+                "Milanesa con ensalada", "Milanesa al horno", 25, "Alta en proteína", List.of(milanesaDish, ensaladaDish));
         when(mealSuggester.suggest(any())).thenReturn(new MealSuggestionResult(List.of(option), null));
-        when(matcher.resolve(eq(userId), eq(List.of(itemA, itemB)))).thenReturn(passthrough(List.of(itemA, itemB)));
+        when(matcher.resolveDishes(eq(userId), eq(List.of(milanesaDish, ensaladaDish))))
+                .thenReturn(List.of(
+                        ResolvedDish.aggregate(milanesaDish.name(), milanesaDish.grams(), passthrough(List.of(milanesaIngredient))),
+                        ResolvedDish.aggregate(ensaladaDish.name(), ensaladaDish.grams(), passthrough(List.of(ensaladaIngredient)))));
 
         Optional<SuggestionResponse> result = newService().suggest(userId, date, MealType.CENA, null);
 
@@ -100,7 +108,7 @@ class SuggestionServiceTest {
         SuggestionOptionResponse optionResponse = result.get().options().get(0);
         assertThat(optionResponse.totals()).isEqualTo(expectedTotals);
         assertThat(optionResponse.title()).isEqualTo("Milanesa con ensalada");
-        assertThat(optionResponse.items()).hasSize(2);
+        assertThat(optionResponse.dishes()).hasSize(2);
     }
 
     @Test

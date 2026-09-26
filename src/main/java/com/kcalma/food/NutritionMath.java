@@ -54,6 +54,29 @@ public final class NutritionMath {
                 round(per100.sodiumMg() * factor));
     }
 
+    /**
+     * The inverse of {@link #totals}: derives a per-100g breakdown from a known total and portion
+     * size — per100 = totals / grams * 100. Used to derive a DISH's own per-100g values from the
+     * sum of its resolved ingredients' totals (see {@code com.kcalma.food.reference.ResolvedDish}),
+     * so a dish's macros are always backed by real ingredient-level data, never guessed directly.
+     * {@code grams <= 0} returns all-zero per100 rather than dividing by zero (defensive — grams is
+     * validated positive everywhere this is reachable from user input).
+     */
+    public static Per100 per100FromTotals(Totals totals, double grams) {
+        if (grams <= 0) {
+            return new Per100(0, 0, 0, 0, 0, 0, 0);
+        }
+        double factor = 100.0 / grams;
+        return new Per100(
+                totals.kcal() * factor,
+                totals.protein() * factor,
+                totals.fat() * factor,
+                totals.carbs() * factor,
+                totals.fiber() * factor,
+                totals.sugar() * factor,
+                totals.sodiumMg() * factor);
+    }
+
     private static int round(double value) {
         return (int) Math.round(value);
     }

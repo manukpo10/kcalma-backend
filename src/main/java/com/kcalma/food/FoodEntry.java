@@ -7,14 +7,25 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
 import org.hibernate.annotations.UuidGenerator;
+import org.hibernate.type.SqlTypes;
 
-/** Maps to app.food_entry (V2__food_entry.sql). One row per logged food item. */
+/**
+ * Maps to app.food_entry (V2__food_entry.sql). One row per logged DISH — {@code grams}/{@code
+ * kcalPer100}..{@code sodiumMgPer100}/{@code source}/{@code fdcId} are always the dish's own
+ * derived values (see {@code FoodEntryService}), and {@code ingredients} (V9__food_entry_ingredients.sql,
+ * nullable) is its resolved breakdown. Entries logged before V9 shipped have {@code ingredients ==
+ * null} and must keep working exactly as before — every read path treats {@code null} as "no
+ * breakdown to show", never as an error.
+ */
 @Entity
 @Table(name = "food_entry")
 public class FoodEntry {
@@ -61,13 +72,31 @@ public class FoodEntry {
     @Column(name = "sodium_mg_per_100", nullable = false, precision = 8, scale = 2)
     private BigDecimal sodiumMgPer100;
 
+    /**
+     * Dish-level source (may be {@code MIXED} — see {@link FoodSource#combine}). No longer
+     * {@code updatable = false}: editing a dish's ingredients via PATCH (see {@code
+     * FoodEntryService#update}) can change which source the recomputed dish aggregate falls under.
+     */
     @Enumerated(EnumType.STRING)
-    @Column(name = "source", nullable = false, length = 10, updatable = false)
+    @Column(name = "source", nullable = false, length = 10)
     private FoodSource source;
 
-    /** USDA FoodData Central id this entry was matched against, or {@code null} (PERSONAL match with no USDA origin, ESTIMATED, or MANUAL). */
-    @Column(name = "fdc_id", updatable = false)
+    /**
+     * USDA FoodData Central id this entry was matched against, or {@code null} (PERSONAL match with
+     * no USDA origin, ESTIMATED, MANUAL, MIXED, or any multi-ingredient dish). No longer
+     * {@code updatable = false} — see {@link #source}.
+     */
+    @Column(name = "fdc_id")
     private Long fdcId;
+
+    /**
+     * The resolved ingredient breakdown (see {@link FoodEntryIngredient}), persisted as a single
+     * {@code jsonb} value (V9__food_entry_ingredients.sql). {@code null} for entries logged before
+     * V9 — everything reading this column must treat that as "no breakdown", not an error.
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "ingredients")
+    private List<FoodEntryIngredient> ingredients;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -95,7 +124,8 @@ public class FoodEntry {
             BigDecimal sugarPer100,
             BigDecimal sodiumMgPer100,
             FoodSource source,
-            Long fdcId) {
+            Long fdcId,
+            List<FoodEntryIngredient> ingredients) {
         this.userId = userId;
         this.entryDate = entryDate;
         this.mealType = mealType;
@@ -110,6 +140,7 @@ public class FoodEntry {
         this.sodiumMgPer100 = sodiumMgPer100;
         this.source = source;
         this.fdcId = fdcId;
+        this.ingredients = ingredients;
     }
 
     public UUID getId() {
@@ -174,12 +205,51 @@ public class FoodEntry {
         return sodiumMgPer100;
     }
 
+    /**
+     * PATCH-editable: replaces every per-100g field at once from a freshly recomputed dish
+     * aggregate (see {@code FoodEntryService#applyIngredientEdit}) — kept as one method rather than
+     * 7 setters so the fields can never drift out of sync with each other mid-update.
+     */
+    public void setPer100(NutritionMath.Per100 per100) {
+        this.kcalPer100 = bd(per100.kcal());
+        this.proteinPer100 = bd(per100.protein());
+        this.fatPer100 = bd(per100.fat());
+        this.carbsPer100 = bd(per100.carbs());
+        this.fiberPer100 = bd(per100.fiber());
+        this.sugarPer100 = bd(per100.sugar());
+        this.sodiumMgPer100 = bd(per100.sodiumMg());
+    }
+
+    private static BigDecimal bd(double value) {
+        return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP);
+    }
+
     public FoodSource getSource() {
         return source;
     }
 
+    /** PATCH-editable: see {@link #source}. */
+    public void setSource(FoodSource source) {
+        this.source = source;
+    }
+
     public Long getFdcId() {
         return fdcId;
+    }
+
+    /** PATCH-editable: see {@link #fdcId}. */
+    public void setFdcId(Long fdcId) {
+        this.fdcId = fdcId;
+    }
+
+    /** {@code null} for any entry logged before V9 shipped — never an empty list for those rows. */
+    public List<FoodEntryIngredient> getIngredients() {
+        return ingredients;
+    }
+
+    /** PATCH-editable: see {@link #ingredients}. */
+    public void setIngredients(List<FoodEntryIngredient> ingredients) {
+        this.ingredients = ingredients;
     }
 
     public OffsetDateTime getCreatedAt() {

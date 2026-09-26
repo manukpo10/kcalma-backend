@@ -17,7 +17,7 @@ import tools.jackson.databind.node.ObjectNode;
  * {@code analyzeDescription} themselves are not exercised here, only the pure {@code
  * buildRequestBody}/{@code buildTextRequestBody}/{@code buildResponseSchema}/{@code parseResponse}
  * steps, against fixtures built with a plain {@link ObjectMapper} (mirroring what Gemini actually
- * returns).
+ * returns): a list of DISHES, each with its own decomposed ingredients.
  */
 class GeminiFoodAnalyzerTest {
 
@@ -25,39 +25,57 @@ class GeminiFoodAnalyzerTest {
     private final GeminiFoodAnalyzer analyzer = newAnalyzer();
 
     @Test
-    void parseResponse_extractsItemsFromCandidateText() {
+    void parseResponse_extractsDishesAndIngredientsFromCandidateText() {
         JsonNode response = geminiEnvelope(
                 """
-                {"items":[
-                  {"name":"milanesa de carne","canonicalNameEn":"beef, ground, cooked","grams":150,\
+                {"dishes":[
+                  {"name":"milanesa con puré","grams":270,"ingredients":[
+                    {"name":"carne","canonicalNameEn":"beef, ground, cooked","grams":120,\
                 "kcalPer100":250,"proteinPer100":22,\
                 "fatPer100":15,"carbsPer100":8,"fiberPer100":1,"sugarPer100":0.5,"sodiumMgPer100":450},
-                  {"name":"puré de papas","canonicalNameEn":"potatoes, mashed","grams":120,\
+                    {"name":"puré de papas","canonicalNameEn":"potatoes, mashed","grams":150,\
                 "kcalPer100":90,"proteinPer100":2,\
                 "fatPer100":2,"carbsPer100":17,"fiberPer100":1.5,"sugarPer100":1,"sodiumMgPer100":200}
+                  ]},
+                  {"name":"banana","grams":120,"ingredients":[
+                    {"name":"banana","canonicalNameEn":"banana, raw","grams":120,\
+                "kcalPer100":89,"proteinPer100":1.1,\
+                "fatPer100":0.3,"carbsPer100":23,"fiberPer100":2.6,"sugarPer100":12,"sodiumMgPer100":1}
+                  ]}
                 ],"note":null}""");
 
         FoodAnalysisResult result = analyzer.parseResponse(response);
 
         assertThat(result.note()).isNull();
-        assertThat(result.items()).hasSize(2);
-        AnalyzedFoodItem first = result.items().get(0);
-        assertThat(first.name()).isEqualTo("milanesa de carne");
-        assertThat(first.canonicalNameEn()).isEqualTo("beef, ground, cooked");
-        assertThat(first.grams()).isEqualTo(150);
-        assertThat(first.kcalPer100()).isEqualTo(250);
-        assertThat(first.proteinPer100()).isEqualTo(22);
-        assertThat(first.sodiumMgPer100()).isEqualTo(450);
+        assertThat(result.dishes()).hasSize(2);
+
+        AnalyzedDish dish = result.dishes().get(0);
+        assertThat(dish.name()).isEqualTo("milanesa con puré");
+        assertThat(dish.grams()).isEqualTo(270);
+        assertThat(dish.ingredients()).hasSize(2);
+        AnalyzedFoodItem carne = dish.ingredients().get(0);
+        assertThat(carne.name()).isEqualTo("carne");
+        assertThat(carne.canonicalNameEn()).isEqualTo("beef, ground, cooked");
+        assertThat(carne.grams()).isEqualTo(120);
+        assertThat(carne.kcalPer100()).isEqualTo(250);
+        assertThat(carne.proteinPer100()).isEqualTo(22);
+        assertThat(carne.sodiumMgPer100()).isEqualTo(450);
+
+        AnalyzedDish simpleFood = result.dishes().get(1);
+        assertThat(simpleFood.name()).isEqualTo("banana");
+        // A simple food is exactly one ingredient, equal to the dish itself.
+        assertThat(simpleFood.ingredients()).hasSize(1);
+        assertThat(simpleFood.ingredients().get(0).grams()).isEqualTo(simpleFood.grams());
     }
 
     @Test
-    void parseResponse_notFoodImage_returnsEmptyItemsWithNote() {
+    void parseResponse_notFoodImage_returnsEmptyDishesWithNote() {
         JsonNode response = geminiEnvelope("""
-                {"items":[],"note":"La imagen no muestra comida."}""");
+                {"dishes":[],"note":"La imagen no muestra comida."}""");
 
         FoodAnalysisResult result = analyzer.parseResponse(response);
 
-        assertThat(result.items()).isEmpty();
+        assertThat(result.dishes()).isEmpty();
         assertThat(result.note()).isEqualTo("La imagen no muestra comida.");
     }
 
@@ -97,6 +115,16 @@ class GeminiFoodAnalyzerTest {
     }
 
     @Test
+    void buildRequestBody_photoPromptAsksToDecomposeDishesIntoIngredients() {
+        ObjectNode body = analyzer.buildRequestBody(new byte[] {1}, "image/jpeg");
+
+        String text = body.path("contents").path(0).path("parts").path(0).path("text").asText();
+        assertThat(text).containsIgnoringCase("plato");
+        assertThat(text).containsIgnoringCase("ingredientes");
+        assertThat(text).contains("2 a 8 ingredientes");
+    }
+
+    @Test
     void buildTextRequestBody_embedsDescriptionBetweenDelimitersAndReusesResponseSchema() {
         ObjectNode body = analyzer.buildTextRequestBody("2 empanadas de carne y una ensalada chica");
 
@@ -133,18 +161,26 @@ class GeminiFoodAnalyzerTest {
     }
 
     @Test
-    void buildResponseSchema_declaresItemsArrayAndNullableNote() {
+    void buildResponseSchema_declaresDishesArrayWithNestedIngredientsAndNullableNote() {
         ObjectNode schema = analyzer.buildResponseSchema();
 
         assertThat(schema.path("type").asText()).isEqualTo("OBJECT");
-        JsonNode itemSchema = schema.path("properties").path("items").path("items");
-        assertThat(itemSchema.path("type").asText()).isEqualTo("OBJECT");
-        assertThat(itemSchema.path("properties").path("kcalPer100").path("type").asText()).isEqualTo("NUMBER");
-        assertThat(itemSchema.path("properties").path("canonicalNameEn").path("type").asText()).isEqualTo("STRING");
-        ArrayNode required = (ArrayNode) itemSchema.path("required");
+        JsonNode dishSchema = schema.path("properties").path("dishes").path("items");
+        assertThat(dishSchema.path("type").asText()).isEqualTo("OBJECT");
+        assertThat(dishSchema.path("properties").path("grams").path("type").asText()).isEqualTo("NUMBER");
+
+        JsonNode ingredientSchema = dishSchema.path("properties").path("ingredients").path("items");
+        assertThat(ingredientSchema.path("type").asText()).isEqualTo("OBJECT");
+        assertThat(ingredientSchema.path("properties").path("kcalPer100").path("type").asText()).isEqualTo("NUMBER");
+        assertThat(ingredientSchema.path("properties").path("canonicalNameEn").path("type").asText())
+                .isEqualTo("STRING");
+        ArrayNode required = (ArrayNode) ingredientSchema.path("required");
         assertThat(required)
                 .extracting(JsonNode::asText)
                 .contains("name", "canonicalNameEn", "kcalPer100", "sodiumMgPer100");
+
+        ArrayNode dishRequired = (ArrayNode) dishSchema.path("required");
+        assertThat(dishRequired).extracting(JsonNode::asText).contains("name", "grams", "ingredients");
     }
 
     private JsonNode geminiEnvelope(String candidateText) {

@@ -9,7 +9,7 @@ import com.kcalma.food.dto.FoodEntryResponse;
 import com.kcalma.food.dto.SaveFoodEntriesRequest;
 import com.kcalma.food.dto.UpdateFoodEntryRequest;
 import com.kcalma.food.reference.FoodReferenceMatcher;
-import com.kcalma.food.reference.ResolvedFoodItem;
+import com.kcalma.food.reference.ResolvedDish;
 import jakarta.validation.Valid;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -69,10 +69,10 @@ public class FoodController {
         return ResponseEntity.ok(resolveAndBuildResponse(jwt, result));
     }
 
-    /** Resolves every analyzed item against the caller's library/the USDA reference before it ever reaches the client. */
+    /** Resolves every dish's ingredients against the caller's library/the USDA reference before it ever reaches the client. */
     private FoodAnalysisResponse resolveAndBuildResponse(Jwt jwt, FoodAnalysisResult result) {
         UUID userId = UUID.fromString(jwt.getSubject());
-        List<ResolvedFoodItem> resolved = referenceMatcher.resolve(userId, result.items());
+        List<ResolvedDish> resolved = referenceMatcher.resolveDishes(userId, result.dishes());
         return FoodAnalysisResponse.fromResolved(resolved, result.note());
     }
 

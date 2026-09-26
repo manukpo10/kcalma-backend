@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 
 import com.kcalma.food.FoodSource;
 import com.kcalma.food.NutritionMath;
+import com.kcalma.food.analysis.AnalyzedDish;
 import com.kcalma.food.analysis.AnalyzedFoodItem;
 import java.math.BigDecimal;
 import java.util.List;
@@ -164,6 +165,43 @@ class FoodReferenceMatcherTest {
         assertThat(result).hasSize(2);
         assertThat(result.get(0).source()).isEqualTo(FoodSource.PERSONAL);
         assertThat(result.get(1).source()).isEqualTo(FoodSource.ESTIMATED);
+    }
+
+    @Test
+    void resolveDish_resolvesEveryIngredientThenAggregatesTheDish() {
+        when(userFoodRepository.findByUserIdAndNormalizedName(userId, "carne"))
+                .thenReturn(Optional.of(userFood("carne", "Carne (mía)", UserFoodSource.USER, null)));
+        when(userFoodRepository.findByUserIdAndNormalizedName(userId, "pan rallado")).thenReturn(Optional.empty());
+        when(userFoodRepository.findBestFuzzyMatch(any(), any(), anyDouble())).thenReturn(Optional.empty());
+        when(foodReferenceRepository.findBestMatch(anyString(), anyDouble(), anyBoolean())).thenReturn(Optional.empty());
+
+        AnalyzedDish dish = new AnalyzedDish(
+                "Milanesa", 150, List.of(item("Carne", "beef, cooked"), item("Pan rallado", "breadcrumbs")));
+
+        ResolvedDish resolved = newMatcher().resolveDish(userId, dish);
+
+        assertThat(resolved.name()).isEqualTo("Milanesa");
+        assertThat(resolved.ingredients()).hasSize(2);
+        assertThat(resolved.ingredients().get(0).source()).isEqualTo(FoodSource.PERSONAL);
+        assertThat(resolved.ingredients().get(1).source()).isEqualTo(FoodSource.ESTIMATED);
+        // Mixed sources across ingredients -> dish-level MIXED (see FoodSource#combine).
+        assertThat(resolved.source()).isEqualTo(FoodSource.MIXED);
+    }
+
+    @Test
+    void resolveDishes_resolvesEachDishIndependently() {
+        when(userFoodRepository.findByUserIdAndNormalizedName(any(), any())).thenReturn(Optional.empty());
+        when(userFoodRepository.findBestFuzzyMatch(any(), any(), anyDouble())).thenReturn(Optional.empty());
+        when(foodReferenceRepository.findBestMatch(anyString(), anyDouble(), anyBoolean())).thenReturn(Optional.empty());
+
+        AnalyzedDish banana = new AnalyzedDish("Banana", 120, List.of(item("Banana", "banana, raw")));
+        AnalyzedDish yogur = new AnalyzedDish("Yogur", 100, List.of(item("Yogur", "yogurt, plain")));
+
+        List<ResolvedDish> result = newMatcher().resolveDishes(userId, List.of(banana, yogur));
+
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).name()).isEqualTo("Banana");
+        assertThat(result.get(1).name()).isEqualTo("Yogur");
     }
 
     private FoodReferenceMatcher newMatcher() {

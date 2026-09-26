@@ -2,6 +2,7 @@ package com.kcalma.food.reference;
 
 import com.kcalma.food.FoodSource;
 import com.kcalma.food.NutritionMath;
+import com.kcalma.food.analysis.AnalyzedDish;
 import com.kcalma.food.analysis.AnalyzedFoodItem;
 import java.util.List;
 import java.util.Optional;
@@ -17,6 +18,11 @@ import org.springframework.transaction.annotation.Transactional;
  * used as-is. Applied to the photo/text analyze flows and to meal suggestions alike — see {@code
  * FoodController} and {@code SuggestionService}. Totals are still always derived from the
  * resolved per-100g values via {@link NutritionMath}, never stored/computed here.
+ *
+ * <p>Every dish is decomposed into ingredients before it ever reaches this class (see {@link
+ * AnalyzedDish}) — {@link #resolveDish}/{@link #resolveDishes} resolve each ingredient
+ * independently via {@link #resolve} and then aggregate the dish's own totals/per100/source from
+ * those resolved ingredients (see {@link ResolvedDish#aggregate}).
  */
 @Service
 public class FoodReferenceMatcher {
@@ -49,6 +55,19 @@ public class FoodReferenceMatcher {
     @Transactional(readOnly = true)
     public List<ResolvedFoodItem> resolve(UUID userId, List<AnalyzedFoodItem> items) {
         return items.stream().map(item -> resolveOne(userId, item)).toList();
+    }
+
+    /** Resolves every one of a dish's ingredients, then aggregates the dish's own totals/per100/source. */
+    @Transactional(readOnly = true)
+    public ResolvedDish resolveDish(UUID userId, AnalyzedDish dish) {
+        List<ResolvedFoodItem> ingredients = resolve(userId, dish.ingredients());
+        return ResolvedDish.aggregate(dish.name(), dish.grams(), ingredients);
+    }
+
+    /** {@link #resolveDish} for every dish in an analysis/suggestion result. */
+    @Transactional(readOnly = true)
+    public List<ResolvedDish> resolveDishes(UUID userId, List<AnalyzedDish> dishes) {
+        return dishes.stream().map(dish -> resolveDish(userId, dish)).toList();
     }
 
     private ResolvedFoodItem resolveOne(UUID userId, AnalyzedFoodItem item) {

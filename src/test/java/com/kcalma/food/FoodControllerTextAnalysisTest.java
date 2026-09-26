@@ -9,11 +9,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.kcalma.food.analysis.AnalyzedDish;
 import com.kcalma.food.analysis.AnalyzedFoodItem;
 import com.kcalma.food.analysis.FoodAnalysisException;
 import com.kcalma.food.analysis.FoodAnalysisResult;
 import com.kcalma.food.analysis.FoodAnalyzer;
 import com.kcalma.food.reference.FoodReferenceMatcher;
+import com.kcalma.food.reference.ResolvedDish;
 import com.kcalma.food.reference.ResolvedFoodItem;
 import com.kcalma.security.SecurityConfig;
 import java.time.Instant;
@@ -106,33 +108,36 @@ class FoodControllerTextAnalysisTest {
     }
 
     @Test
-    void validDescription_returns200WithAnalyzedItems() throws Exception {
+    void validDescription_returns200WithAnalyzedDishes() throws Exception {
         when(jwtDecoder.decode(TOKEN)).thenReturn(jwtFor(OWNER_ID));
         AnalyzedFoodItem item =
                 new AnalyzedFoodItem("empanada de carne", "empanada, beef, baked", 90, 250, 9, 12, 22, 1.5, 1, 380);
-        when(foodAnalyzer.analyzeDescription(anyString())).thenReturn(new FoodAnalysisResult(List.of(item), null));
-        when(foodReferenceMatcher.resolve(eq(UUID.fromString(OWNER_ID)), eq(List.of(item))))
-                .thenReturn(List.of(new ResolvedFoodItem(
-                        item.name(),
-                        item.canonicalNameEn(),
-                        item.grams(),
-                        new com.kcalma.food.NutritionMath.Per100(
-                                item.kcalPer100(),
-                                item.proteinPer100(),
-                                item.fatPer100(),
-                                item.carbsPer100(),
-                                item.fiberPer100(),
-                                item.sugarPer100(),
-                                item.sodiumMgPer100()),
-                        FoodSource.ESTIMATED,
-                        null,
-                        null)));
+        AnalyzedDish dish = new AnalyzedDish("empanada de carne", 90, List.of(item));
+        when(foodAnalyzer.analyzeDescription(anyString())).thenReturn(new FoodAnalysisResult(List.of(dish), null));
+        ResolvedFoodItem resolvedItem = new ResolvedFoodItem(
+                item.name(),
+                item.canonicalNameEn(),
+                item.grams(),
+                new com.kcalma.food.NutritionMath.Per100(
+                        item.kcalPer100(),
+                        item.proteinPer100(),
+                        item.fatPer100(),
+                        item.carbsPer100(),
+                        item.fiberPer100(),
+                        item.sugarPer100(),
+                        item.sodiumMgPer100()),
+                FoodSource.ESTIMATED,
+                null,
+                null);
+        when(foodReferenceMatcher.resolveDishes(eq(UUID.fromString(OWNER_ID)), eq(List.of(dish))))
+                .thenReturn(List.of(ResolvedDish.aggregate(dish.name(), dish.grams(), List.of(resolvedItem))));
 
         mockMvc.perform(authenticatedPost("{\"description\": \"2 empanadas de carne\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.items[0].name").value("empanada de carne"))
-                .andExpect(jsonPath("$.items[0].grams").value(90.0))
-                .andExpect(jsonPath("$.items[0].source").value("ESTIMATED"))
+                .andExpect(jsonPath("$.dishes[0].name").value("empanada de carne"))
+                .andExpect(jsonPath("$.dishes[0].grams").value(90.0))
+                .andExpect(jsonPath("$.dishes[0].source").value("ESTIMATED"))
+                .andExpect(jsonPath("$.dishes[0].ingredients[0].name").value("empanada de carne"))
                 .andExpect(jsonPath("$.note").doesNotExist());
     }
 

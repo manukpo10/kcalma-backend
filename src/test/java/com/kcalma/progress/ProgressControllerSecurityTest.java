@@ -23,9 +23,10 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
- * Web/security slice test for GET /api/progress, same owner-allowlist contract as
- * {@code DayControllerSecurityTest}: no token -> 401, non-owner -> 403, owner -> 200. Also covers
- * the one controller-level validation: an unknown {@code range} value -> 400 Spanish message.
+ * Web/security slice test for GET /api/progress, same open-registration contract as
+ * {@code DayControllerSecurityTest}: no token -> 401, anonymous Supabase user -> 403, any other
+ * authenticated user -> 200. Also covers the one controller-level validation: an unknown
+ * {@code range} value -> 400 Spanish message.
  */
 @WebMvcTest(ProgressController.class)
 @Import(SecurityConfig.class)
@@ -55,8 +56,18 @@ class ProgressControllerSecurityTest {
     }
 
     @Test
-    void validTokenFromNonOwner_returns403() throws Exception {
+    void validTokenFromNonOwner_returns200() throws Exception {
         when(jwtDecoder.decode(TOKEN)).thenReturn(jwtFor(NON_OWNER_ID));
+        when(progressService.getProgress(UUID.fromString(NON_OWNER_ID), ProgressRange.ONE_MONTH))
+                .thenReturn(Optional.of(sampleResponse()));
+
+        mockMvc.perform(get("/api/progress").header("Authorization", "Bearer " + TOKEN).param("range", "1M"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void anonymousSupabaseToken_returns403() throws Exception {
+        when(jwtDecoder.decode(TOKEN)).thenReturn(anonymousJwtFor(NON_OWNER_ID));
 
         mockMvc.perform(get("/api/progress").header("Authorization", "Bearer " + TOKEN).param("range", "1M"))
                 .andExpect(status().isForbidden());
@@ -98,6 +109,18 @@ class ProgressControllerSecurityTest {
                 .issuedAt(now)
                 .expiresAt(now.plusSeconds(3600))
                 .claim("aud", "authenticated")
+                .build();
+    }
+
+    private static Jwt anonymousJwtFor(String subject) {
+        Instant now = Instant.now();
+        return Jwt.withTokenValue(TOKEN)
+                .header("alg", "ES256")
+                .subject(subject)
+                .issuedAt(now)
+                .expiresAt(now.plusSeconds(3600))
+                .claim("aud", "authenticated")
+                .claim("is_anonymous", true)
                 .build();
     }
 

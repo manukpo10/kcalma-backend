@@ -26,7 +26,7 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-/** Web/security slice test, same owner-allowlist contract as {@code WeightControllerSecurityTest}: no token -> 401, non-owner -> 403, owner -> 2xx. */
+/** Web/security slice test, same open-registration contract as {@code WeightControllerSecurityTest}: no token -> 401, anonymous Supabase user -> 403, any other authenticated user -> 2xx. */
 @WebMvcTest(PushController.class)
 @Import(SecurityConfig.class)
 @TestPropertySource(properties = {
@@ -61,8 +61,17 @@ class PushControllerSecurityTest {
     }
 
     @Test
-    void validTokenFromNonOwner_returns403() throws Exception {
+    void validTokenFromNonOwner_returns200() throws Exception {
         when(jwtDecoder.decode(TOKEN)).thenReturn(jwtFor(NON_OWNER_ID));
+        when(vapidKeyService.getPublicKeyBase64Url()).thenReturn("abc123");
+
+        mockMvc.perform(get("/api/push/public-key").header("Authorization", "Bearer " + TOKEN))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void anonymousSupabaseToken_returns403() throws Exception {
+        when(jwtDecoder.decode(TOKEN)).thenReturn(anonymousJwtFor(NON_OWNER_ID));
 
         mockMvc.perform(get("/api/push/public-key").header("Authorization", "Bearer " + TOKEN))
                 .andExpect(status().isForbidden());
@@ -208,6 +217,18 @@ class PushControllerSecurityTest {
                 .issuedAt(now)
                 .expiresAt(now.plusSeconds(3600))
                 .claim("aud", "authenticated")
+                .build();
+    }
+
+    private static Jwt anonymousJwtFor(String subject) {
+        Instant now = Instant.now();
+        return Jwt.withTokenValue(TOKEN)
+                .header("alg", "ES256")
+                .subject(subject)
+                .issuedAt(now)
+                .expiresAt(now.plusSeconds(3600))
+                .claim("aud", "authenticated")
+                .claim("is_anonymous", true)
                 .build();
     }
 }

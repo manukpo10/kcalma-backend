@@ -41,11 +41,11 @@ import org.springframework.web.server.ResponseStatusException;
 
 /**
  * Web slice test for POST /api/food/analyze-text: blank/too-long description validation (400,
- * friendly Spanish message), the happy path, provider-failure translation (shared with the photo
- * endpoint via {@link com.kcalma.food.analysis.FoodAnalysisExceptionHandler}), and the same
- * owner-allowlist security contract as the rest of {@link FoodController}. Same {@code
- * @WebMvcTest} + {@code SecurityConfig} setup as {@link FoodControllerSecurityTest} and {@link
- * FoodControllerImageValidationTest}.
+ * friendly Spanish message), the happy path, and provider-failure translation (shared with the
+ * photo endpoint via {@link com.kcalma.food.analysis.FoodAnalysisExceptionHandler}). The
+ * open-registration security contract itself is {@link FoodControllerSecurityTest}'s job, not
+ * re-tested here. Same {@code @WebMvcTest} + {@code SecurityConfig} setup as {@link
+ * FoodControllerSecurityTest} and {@link FoodControllerImageValidationTest}.
  */
 @WebMvcTest(FoodController.class)
 @Import({SecurityConfig.class, ClockConfig.class})
@@ -58,7 +58,6 @@ import org.springframework.web.server.ResponseStatusException;
 class FoodControllerTextAnalysisTest {
 
     private static final String OWNER_ID = "11111111-1111-1111-1111-111111111111";
-    private static final String NON_OWNER_ID = "22222222-2222-2222-2222-222222222222";
     private static final String TOKEN = "valid-token";
 
     @Autowired
@@ -183,16 +182,6 @@ class FoodControllerTextAnalysisTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"description\": \"un mate cocido\"}"))
                 .andExpect(status().isUnauthorized());
-
-        verifyNoInteractions(foodAnalyzer);
-    }
-
-    @Test
-    void validTokenFromNonOwner_returns403() throws Exception {
-        when(jwtDecoder.decode(TOKEN)).thenReturn(jwtFor(NON_OWNER_ID));
-
-        mockMvc.perform(authenticatedPost("{\"description\": \"un mate cocido\"}"))
-                .andExpect(status().isForbidden());
 
         verifyNoInteractions(foodAnalyzer);
     }

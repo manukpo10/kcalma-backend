@@ -21,7 +21,7 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-/** Web/security slice test for the favorites endpoints, same owner-allowlist contract as {@code WeightControllerSecurityTest}. */
+/** Web/security slice test for the favorites endpoints, same open-registration contract as {@code WeightControllerSecurityTest}. */
 @WebMvcTest(FavoriteController.class)
 @Import(SecurityConfig.class)
 @TestPropertySource(properties = {
@@ -50,8 +50,16 @@ class FavoriteControllerSecurityTest {
     }
 
     @Test
-    void validTokenFromNonOwner_list_returns403() throws Exception {
+    void validTokenFromNonOwner_list_returns200() throws Exception {
         when(jwtDecoder.decode(TOKEN)).thenReturn(jwtFor(NON_OWNER_ID));
+        when(favoriteDishService.findAll(UUID.fromString(NON_OWNER_ID))).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/favorites").header("Authorization", "Bearer " + TOKEN)).andExpect(status().isOk());
+    }
+
+    @Test
+    void anonymousSupabaseToken_list_returns403() throws Exception {
+        when(jwtDecoder.decode(TOKEN)).thenReturn(anonymousJwtFor(NON_OWNER_ID));
 
         mockMvc.perform(get("/api/favorites").header("Authorization", "Bearer " + TOKEN)).andExpect(status().isForbidden());
     }
@@ -93,6 +101,18 @@ class FavoriteControllerSecurityTest {
                 .issuedAt(now)
                 .expiresAt(now.plusSeconds(3600))
                 .claim("aud", "authenticated")
+                .build();
+    }
+
+    private static Jwt anonymousJwtFor(String subject) {
+        Instant now = Instant.now();
+        return Jwt.withTokenValue(TOKEN)
+                .header("alg", "ES256")
+                .subject(subject)
+                .issuedAt(now)
+                .expiresAt(now.plusSeconds(3600))
+                .claim("aud", "authenticated")
+                .claim("is_anonymous", true)
                 .build();
     }
 }

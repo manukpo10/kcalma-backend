@@ -28,12 +28,12 @@ import org.springframework.web.server.ResponseStatusException;
 
 /**
  * Web slice test for DELETE /api/food/entries?date=&amp;mealType= — the delete-a-whole-meal
- * endpoint: missing/invalid query param validation (400, Spanish message), the happy path (204,
- * always — even when nothing matched), and the same owner-allowlist security contract as the rest
- * of {@link FoodController}. Same {@code @WebMvcTest} + {@code SecurityConfig} setup as
- * {@link FoodControllerSecurityTest} and {@link FoodControllerTextAnalysisTest}; see the latter for
- * why the {@link ResponseStatusException} reason is asserted directly instead of via the response
- * body in this slice.
+ * endpoint: missing/invalid query param validation (400, Spanish message) and the happy path (204,
+ * always — even when nothing matched). The open-registration security contract itself is {@link
+ * FoodControllerSecurityTest}'s job, not re-tested here. Same {@code @WebMvcTest} + {@code
+ * SecurityConfig} setup as {@link FoodControllerSecurityTest} and {@link
+ * FoodControllerTextAnalysisTest}; see the latter for why the {@link ResponseStatusException}
+ * reason is asserted directly instead of via the response body in this slice.
  */
 @WebMvcTest(FoodController.class)
 @Import({SecurityConfig.class, ClockConfig.class})
@@ -46,7 +46,6 @@ import org.springframework.web.server.ResponseStatusException;
 class FoodControllerDeleteMealTest {
 
     private static final String OWNER_ID = "11111111-1111-1111-1111-111111111111";
-    private static final String NON_OWNER_ID = "22222222-2222-2222-2222-222222222222";
     private static final String TOKEN = "valid-token";
 
     @Autowired
@@ -144,16 +143,6 @@ class FoodControllerDeleteMealTest {
     void noToken_returns401() throws Exception {
         mockMvc.perform(delete("/api/food/entries").param("date", "2026-09-25").param("mealType", "DESAYUNO"))
                 .andExpect(status().isUnauthorized());
-
-        verifyNoInteractions(foodEntryService);
-    }
-
-    @Test
-    void validTokenFromNonOwner_returns403() throws Exception {
-        when(jwtDecoder.decode(TOKEN)).thenReturn(jwtFor(NON_OWNER_ID));
-
-        mockMvc.perform(authenticatedDelete().param("date", "2026-09-25").param("mealType", "DESAYUNO"))
-                .andExpect(status().isForbidden());
 
         verifyNoInteractions(foodEntryService);
     }

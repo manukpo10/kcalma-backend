@@ -27,8 +27,8 @@ import org.springframework.test.web.servlet.MockMvc;
 
 /**
  * Fast web/security slice test: real {@link SecurityConfig} filter chain, mocked {@link JwtDecoder}
- * so no network call ever happens. Proves the three-way owner-allowlist contract:
- * no token -&gt; 401, valid token from a non-owner -&gt; 403, owner -&gt; 200.
+ * so no network call ever happens. Proves the three-way open-registration contract:
+ * no token -&gt; 401, an anonymous Supabase user's token -&gt; 403, any other authenticated user -&gt; 200.
  */
 @WebMvcTest(ProfileController.class)
 @Import(SecurityConfig.class)
@@ -59,8 +59,17 @@ class ProfileControllerSecurityTest {
     }
 
     @Test
-    void validTokenFromNonOwner_returns403() throws Exception {
+    void validTokenFromNonOwner_returns200() throws Exception {
         when(jwtDecoder.decode(TOKEN)).thenReturn(jwtFor(NON_OWNER_ID));
+        when(profileService.findByUserId(UUID.fromString(NON_OWNER_ID))).thenReturn(Optional.of(sampleResponse()));
+
+        mockMvc.perform(get("/api/profile").header("Authorization", "Bearer " + TOKEN))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void anonymousSupabaseToken_returns403() throws Exception {
+        when(jwtDecoder.decode(TOKEN)).thenReturn(anonymousJwtFor(NON_OWNER_ID));
 
         mockMvc.perform(get("/api/profile").header("Authorization", "Bearer " + TOKEN))
                 .andExpect(status().isForbidden());
@@ -84,6 +93,18 @@ class ProfileControllerSecurityTest {
                 .issuedAt(now)
                 .expiresAt(now.plusSeconds(3600))
                 .claim("aud", "authenticated")
+                .build();
+    }
+
+    private static Jwt anonymousJwtFor(String subject) {
+        Instant now = Instant.now();
+        return Jwt.withTokenValue(TOKEN)
+                .header("alg", "ES256")
+                .subject(subject)
+                .issuedAt(now)
+                .expiresAt(now.plusSeconds(3600))
+                .claim("aud", "authenticated")
+                .claim("is_anonymous", true)
                 .build();
     }
 

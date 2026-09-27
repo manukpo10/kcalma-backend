@@ -21,7 +21,7 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-/** Web/security slice test for POST /api/water, same owner-allowlist contract as {@code WeightControllerSecurityTest}. */
+/** Web/security slice test for POST /api/water, same open-registration contract as {@code WeightControllerSecurityTest}. */
 @WebMvcTest(WaterController.class)
 @Import({SecurityConfig.class, ClockConfig.class})
 @TestPropertySource(properties = {
@@ -52,8 +52,21 @@ class WaterControllerSecurityTest {
     }
 
     @Test
-    void validTokenFromNonOwner_returns403() throws Exception {
+    void validTokenFromNonOwner_returns200() throws Exception {
         when(jwtDecoder.decode(TOKEN)).thenReturn(jwtFor(NON_OWNER_ID));
+        when(waterLogService.applyDelta(UUID.fromString(NON_OWNER_ID), LocalDate.parse("2026-09-25"), 250))
+                .thenReturn(new WaterResponse(LocalDate.parse("2026-09-25"), 250, 2500));
+
+        mockMvc.perform(post("/api/water")
+                        .header("Authorization", "Bearer " + TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"date\":\"2026-09-25\",\"deltaMl\":250}"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void anonymousSupabaseToken_returns403() throws Exception {
+        when(jwtDecoder.decode(TOKEN)).thenReturn(anonymousJwtFor(NON_OWNER_ID));
 
         mockMvc.perform(post("/api/water")
                         .header("Authorization", "Bearer " + TOKEN)
@@ -96,6 +109,18 @@ class WaterControllerSecurityTest {
                 .issuedAt(now)
                 .expiresAt(now.plusSeconds(3600))
                 .claim("aud", "authenticated")
+                .build();
+    }
+
+    private static Jwt anonymousJwtFor(String subject) {
+        Instant now = Instant.now();
+        return Jwt.withTokenValue(TOKEN)
+                .header("alg", "ES256")
+                .subject(subject)
+                .issuedAt(now)
+                .expiresAt(now.plusSeconds(3600))
+                .claim("aud", "authenticated")
+                .claim("is_anonymous", true)
                 .build();
     }
 }

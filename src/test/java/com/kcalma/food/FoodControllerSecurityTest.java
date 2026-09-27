@@ -23,10 +23,10 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
- * Web/security slice test for the food-log endpoints, same owner-allowlist contract as
- * {@code ProfileControllerSecurityTest}: no token -> 401, non-owner -> 403, owner -> 200.
- * Exercised against GET /api/food/entries since the chain-level {@code /api/**} rule in
- * {@link SecurityConfig} — not per-controller logic — is what's under test.
+ * Web/security slice test for the food-log endpoints, same open-registration contract as
+ * {@code ProfileControllerSecurityTest}: no token -> 401, anonymous Supabase user -> 403, any other
+ * authenticated user -> 200. Exercised against GET /api/food/entries since the chain-level
+ * {@code /api/**} rule in {@link SecurityConfig} — not per-controller logic — is what's under test.
  */
 @WebMvcTest(FoodController.class)
 @Import({SecurityConfig.class, ClockConfig.class})
@@ -70,8 +70,18 @@ class FoodControllerSecurityTest {
     }
 
     @Test
-    void validTokenFromNonOwner_returns403() throws Exception {
+    void validTokenFromNonOwner_returns200() throws Exception {
         when(jwtDecoder.decode(TOKEN)).thenReturn(jwtFor(NON_OWNER_ID));
+        when(foodEntryService.findByDate(java.util.UUID.fromString(NON_OWNER_ID), LocalDate.parse("2026-09-25")))
+                .thenReturn(List.of());
+
+        mockMvc.perform(get("/api/food/entries").header("Authorization", "Bearer " + TOKEN).param("date", "2026-09-25"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void anonymousSupabaseToken_returns403() throws Exception {
+        when(jwtDecoder.decode(TOKEN)).thenReturn(anonymousJwtFor(NON_OWNER_ID));
 
         mockMvc.perform(get("/api/food/entries").header("Authorization", "Bearer " + TOKEN).param("date", "2026-09-25"))
                 .andExpect(status().isForbidden());
@@ -95,6 +105,18 @@ class FoodControllerSecurityTest {
                 .issuedAt(now)
                 .expiresAt(now.plusSeconds(3600))
                 .claim("aud", "authenticated")
+                .build();
+    }
+
+    private static Jwt anonymousJwtFor(String subject) {
+        Instant now = Instant.now();
+        return Jwt.withTokenValue(TOKEN)
+                .header("alg", "ES256")
+                .subject(subject)
+                .issuedAt(now)
+                .expiresAt(now.plusSeconds(3600))
+                .claim("aud", "authenticated")
+                .claim("is_anonymous", true)
                 .build();
     }
 }

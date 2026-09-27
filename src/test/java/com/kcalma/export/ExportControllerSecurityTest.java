@@ -22,7 +22,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
-/** Web/security slice test for GET /api/export, same owner-allowlist contract as {@code WeightControllerSecurityTest}. */
+/** Web/security slice test for GET /api/export, same open-registration contract as {@code WeightControllerSecurityTest}. */
 @WebMvcTest(ExportController.class)
 @Import({SecurityConfig.class, ClockConfig.class})
 @TestPropertySource(properties = {
@@ -52,8 +52,17 @@ class ExportControllerSecurityTest {
     }
 
     @Test
-    void validTokenFromNonOwner_returns403() throws Exception {
+    void validTokenFromNonOwner_returns200() throws Exception {
         when(jwtDecoder.decode(TOKEN)).thenReturn(jwtFor(NON_OWNER_ID));
+        when(exportService.buildJson(UUID.fromString(NON_OWNER_ID)))
+                .thenReturn(new ExportResponse(OffsetDateTime.now(), null, java.util.List.of(), java.util.List.of(), java.util.List.of(), java.util.List.of()));
+
+        mockMvc.perform(get("/api/export").header("Authorization", "Bearer " + TOKEN)).andExpect(status().isOk());
+    }
+
+    @Test
+    void anonymousSupabaseToken_returns403() throws Exception {
+        when(jwtDecoder.decode(TOKEN)).thenReturn(anonymousJwtFor(NON_OWNER_ID));
 
         mockMvc.perform(get("/api/export").header("Authorization", "Bearer " + TOKEN)).andExpect(status().isForbidden());
     }
@@ -99,6 +108,18 @@ class ExportControllerSecurityTest {
                 .issuedAt(now)
                 .expiresAt(now.plusSeconds(3600))
                 .claim("aud", "authenticated")
+                .build();
+    }
+
+    private static Jwt anonymousJwtFor(String subject) {
+        Instant now = Instant.now();
+        return Jwt.withTokenValue(TOKEN)
+                .header("alg", "ES256")
+                .subject(subject)
+                .issuedAt(now)
+                .expiresAt(now.plusSeconds(3600))
+                .claim("aud", "authenticated")
+                .claim("is_anonymous", true)
                 .build();
     }
 }

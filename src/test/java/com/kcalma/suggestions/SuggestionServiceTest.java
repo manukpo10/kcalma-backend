@@ -17,10 +17,21 @@ import com.kcalma.food.analysis.AnalyzedFoodItem;
 import com.kcalma.food.reference.FoodReferenceMatcher;
 import com.kcalma.food.reference.ResolvedDish;
 import com.kcalma.food.reference.ResolvedFoodItem;
+import com.kcalma.profile.ActivityLevel;
+import com.kcalma.profile.DietStyle;
+import com.kcalma.profile.DietaryRestriction;
+import com.kcalma.profile.Goal;
+import com.kcalma.profile.ProfileService;
+import com.kcalma.profile.ProteinBasis;
+import com.kcalma.profile.Sex;
 import com.kcalma.profile.dto.NutritionTargetsResponse;
+import com.kcalma.profile.dto.ProfileResponse;
+import com.kcalma.profile.dto.ProfileWithTargetsResponse;
 import com.kcalma.suggestions.dto.SuggestionOptionResponse;
 import com.kcalma.suggestions.dto.SuggestionResponse;
+import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -34,7 +45,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
  * Unit test for {@link SuggestionService}: reuses {@link DayService} for the remaining budget
- * (never trusts client-sent numbers), forwards it plus meal type/preferences to the {@link
+ * (never trusts client-sent numbers) and {@link ProfileService} for the diet-style/dietary-
+ * restrictions hard constraints, forwards all of it plus meal type/preferences to the {@link
  * MealSuggester} port, and computes each option's totals from its dishes' resolved ingredients via
  * {@link NutritionMath} — ignoring anything the model might have claimed as a total, since the
  * port's own data model ({@link SuggestedMealOption}) has no such field to begin with.
@@ -44,6 +56,9 @@ class SuggestionServiceTest {
 
     @Mock
     private DayService dayService;
+
+    @Mock
+    private ProfileService profileService;
 
     @Mock
     private MealSuggester mealSuggester;
@@ -62,12 +77,14 @@ class SuggestionServiceTest {
 
         assertThat(result).isEmpty();
         verifyNoInteractions(mealSuggester);
+        verifyNoInteractions(profileService);
     }
 
     @Test
     void suggest_passesTheDaysRemainingBudgetMealTypeAndPreferencesToThePort() {
         NutritionMath.Totals remaining = new NutritionMath.Totals(600, 40, 20, 70, 8, 15, 500);
         when(dayService.getDay(userId, date)).thenReturn(Optional.of(sampleDay(remaining)));
+        when(profileService.findByUserId(userId)).thenReturn(Optional.of(sampleProfile(DietStyle.BALANCED, List.of())));
         when(mealSuggester.suggest(any())).thenReturn(new MealSuggestionResult(List.of(), null));
 
         newService().suggest(userId, date, MealType.CENA, "tengo pollo y arroz");
@@ -80,9 +97,27 @@ class SuggestionServiceTest {
     }
 
     @Test
+    void suggest_passesTheProfilesDietStyleAndDietaryRestrictionsToThePortAsHardConstraints() {
+        NutritionMath.Totals remaining = new NutritionMath.Totals(600, 40, 20, 70, 8, 15, 500);
+        when(dayService.getDay(userId, date)).thenReturn(Optional.of(sampleDay(remaining)));
+        when(profileService.findByUserId(userId))
+                .thenReturn(Optional.of(sampleProfile(DietStyle.KETO, List.of(DietaryRestriction.VEGETARIAN, DietaryRestriction.GLUTEN_FREE))));
+        when(mealSuggester.suggest(any())).thenReturn(new MealSuggestionResult(List.of(), null));
+
+        newService().suggest(userId, date, MealType.CENA, null);
+
+        ArgumentCaptor<SuggestionContext> captor = ArgumentCaptor.forClass(SuggestionContext.class);
+        verify(mealSuggester).suggest(captor.capture());
+        assertThat(captor.getValue().dietStyle()).isEqualTo(DietStyle.KETO);
+        assertThat(captor.getValue().dietaryRestrictions())
+                .containsExactly(DietaryRestriction.VEGETARIAN, DietaryRestriction.GLUTEN_FREE);
+    }
+
+    @Test
     void suggest_computesEachOptionsTotalsFromItsDishesResolvedIngredientsViaNutritionMath() {
         NutritionMath.Totals remaining = new NutritionMath.Totals(600, 40, 20, 70, 8, 15, 500);
         when(dayService.getDay(userId, date)).thenReturn(Optional.of(sampleDay(remaining)));
+        when(profileService.findByUserId(userId)).thenReturn(Optional.of(sampleProfile(DietStyle.BALANCED, List.of())));
 
         AnalyzedFoodItem milanesaIngredient =
                 new AnalyzedFoodItem("milanesa de carne", "beef, ground, cooked", 150, 200, 25, 8, 6, 1, 0.5, 420);
@@ -115,6 +150,7 @@ class SuggestionServiceTest {
     void suggest_returnsTheDaysRemainingBudgetAndThePortsNote() {
         NutritionMath.Totals remaining = new NutritionMath.Totals(-50, 10, 5, 5, 2, 3, 100);
         when(dayService.getDay(userId, date)).thenReturn(Optional.of(sampleDay(remaining)));
+        when(profileService.findByUserId(userId)).thenReturn(Optional.of(sampleProfile(DietStyle.BALANCED, List.of())));
         when(mealSuggester.suggest(any()))
                 .thenReturn(new MealSuggestionResult(List.of(), "Ya superaste tu objetivo de calorías de hoy."));
 
@@ -127,7 +163,7 @@ class SuggestionServiceTest {
     }
 
     private SuggestionService newService() {
-        return new SuggestionService(dayService, mealSuggester, matcher);
+        return new SuggestionService(dayService, profileService, mealSuggester, matcher);
     }
 
     /** Identity resolution stand-in: keeps each item's own per-100g values, tagged ESTIMATED/unmatched. */
@@ -152,7 +188,8 @@ class SuggestionServiceTest {
     }
 
     private static DayResponse sampleDay(NutritionMath.Totals remaining) {
-        NutritionTargetsResponse targets = new NutritionTargetsResponse(2000, false, 120, 65, 220, 28, 50, 2000, 2500);
+        NutritionTargetsResponse targets = new NutritionTargetsResponse(
+                2000, false, 120, 65, 220, 28, 50, 2000, 2500, 0.0, 0.0, ProteinBasis.BODY_WEIGHT, 60.0, null, List.of());
         NutritionMath.Totals consumed = NutritionMath.Totals.ZERO;
         Map<MealType, List<com.kcalma.food.dto.FoodEntryResponse>> meals = new EnumMap<>(MealType.class);
         for (MealType mealType : MealType.values()) {
@@ -165,5 +202,15 @@ class SuggestionServiceTest {
                 remaining,
                 new DayResponse.Exceeded(remaining.kcal() < 0, false, false),
                 meals);
+    }
+
+    private ProfileWithTargetsResponse sampleProfile(DietStyle dietStyle, List<DietaryRestriction> restrictions) {
+        OffsetDateTime now = OffsetDateTime.now();
+        ProfileResponse profile = new ProfileResponse(
+                userId, Sex.FEMALE, LocalDate.of(1990, 1, 1), 165, new BigDecimal("60.00"), ActivityLevel.SEDENTARY,
+                Goal.MAINTAIN, null, null, dietStyle, restrictions, false, null, null, now, now);
+        NutritionTargetsResponse targets = new NutritionTargetsResponse(
+                2000, false, 120, 65, 220, 28, 50, 2000, 2500, 0.0, 0.0, ProteinBasis.BODY_WEIGHT, 60.0, null, List.of());
+        return new ProfileWithTargetsResponse(profile, targets);
     }
 }

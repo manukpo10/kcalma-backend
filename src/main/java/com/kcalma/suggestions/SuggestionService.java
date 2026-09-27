@@ -6,6 +6,9 @@ import com.kcalma.food.NutritionMath;
 import com.kcalma.food.dto.AnalyzedDishResponse;
 import com.kcalma.food.reference.FoodReferenceMatcher;
 import com.kcalma.food.reference.ResolvedDish;
+import com.kcalma.profile.ProfileService;
+import com.kcalma.profile.dto.ProfileResponse;
+import com.kcalma.profile.dto.ProfileWithTargetsResponse;
 import com.kcalma.suggestions.dto.SuggestionOptionResponse;
 import com.kcalma.suggestions.dto.SuggestionResponse;
 import java.time.LocalDate;
@@ -16,33 +19,43 @@ import org.springframework.stereotype.Service;
 
 /**
  * Composes the day's remaining nutrient budget (via {@link DayService} — the client-sent numbers
- * are never trusted) with the {@link MealSuggester} port's suggestions, resolves every suggested
- * item against the personal library/USDA reference via {@link FoodReferenceMatcher} (same as the
- * photo/text analyze flows), then recomputes every option's totals from the RESOLVED values with
- * {@link NutritionMath} — so a suggestion's totals are just as real as a logged entry's.
+ * are never trusted) and the profile's {@code dietStyle}/{@code dietaryRestrictions} (via {@link
+ * ProfileService} — same reasoning) with the {@link MealSuggester} port's suggestions, resolves
+ * every suggested item against the personal library/USDA reference via {@link
+ * FoodReferenceMatcher} (same as the photo/text analyze flows), then recomputes every option's
+ * totals from the RESOLVED values with {@link NutritionMath} — so a suggestion's totals are just
+ * as real as a logged entry's.
  *
- * <p>Deliberately NOT {@code @Transactional}: {@link DayService#getDay} opens its own short
- * read-only transaction, and the call to {@link MealSuggester} is a slow external HTTP request
- * (up to ~45s) that must never hold a database connection open — this app's connection pool has
- * only 3 connections (see application.yml), so holding one for a whole Gemini round trip would be
- * a real bottleneck.
+ * <p>Deliberately NOT {@code @Transactional}: {@link DayService#getDay} and {@link
+ * ProfileService#findByUserId} each open their own short read-only transaction, and the call to
+ * {@link MealSuggester} is a slow external HTTP request (up to ~45s) that must never hold a
+ * database connection open — this app's connection pool has only 3 connections (see
+ * application.yml), so holding one for a whole Gemini round trip would be a real bottleneck.
  */
 @Service
 public class SuggestionService {
 
     private final DayService dayService;
+    private final ProfileService profileService;
     private final MealSuggester mealSuggester;
     private final FoodReferenceMatcher referenceMatcher;
 
-    public SuggestionService(DayService dayService, MealSuggester mealSuggester, FoodReferenceMatcher referenceMatcher) {
+    public SuggestionService(
+            DayService dayService, ProfileService profileService, MealSuggester mealSuggester, FoodReferenceMatcher referenceMatcher) {
         this.dayService = dayService;
+        this.profileService = profileService;
         this.mealSuggester = mealSuggester;
         this.referenceMatcher = referenceMatcher;
     }
 
     public Optional<SuggestionResponse> suggest(UUID userId, LocalDate date, MealType mealType, String preferences) {
         return dayService.getDay(userId, date).map(day -> {
-            SuggestionContext context = new SuggestionContext(mealType, day.remaining(), preferences);
+            ProfileResponse profile = profileService
+                    .findByUserId(userId)
+                    .map(ProfileWithTargetsResponse::profile)
+                    .orElseThrow(() -> new IllegalStateException("No profile for user " + userId + " despite a day existing"));
+            SuggestionContext context = new SuggestionContext(
+                    mealType, day.remaining(), preferences, profile.dietStyle(), profile.dietaryRestrictions());
             MealSuggestionResult result = mealSuggester.suggest(context);
             List<SuggestionOptionResponse> options = result.options().stream()
                     .map(option -> toOptionResponse(userId, option))

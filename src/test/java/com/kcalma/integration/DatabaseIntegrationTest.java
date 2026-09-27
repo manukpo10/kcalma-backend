@@ -3,6 +3,8 @@ package com.kcalma.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.kcalma.favorites.FavoriteDish;
+import com.kcalma.favorites.FavoriteDishRepository;
 import com.kcalma.food.FoodEntry;
 import com.kcalma.food.FoodEntryIngredient;
 import com.kcalma.food.FoodEntryRepository;
@@ -14,6 +16,8 @@ import com.kcalma.food.reference.FoodReferenceRepository;
 import com.kcalma.food.reference.UserFood;
 import com.kcalma.food.reference.UserFoodRepository;
 import com.kcalma.food.reference.UserFoodSource;
+import com.kcalma.measurement.BodyMeasurement;
+import com.kcalma.measurement.BodyMeasurementRepository;
 import com.kcalma.profile.ActivityLevel;
 import com.kcalma.profile.DietStyle;
 import com.kcalma.profile.DietaryRestriction;
@@ -22,6 +26,8 @@ import com.kcalma.profile.Pace;
 import com.kcalma.profile.Sex;
 import com.kcalma.profile.UserProfile;
 import com.kcalma.profile.UserProfileRepository;
+import com.kcalma.water.WaterLog;
+import com.kcalma.water.WaterLogRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import java.math.BigDecimal;
@@ -103,11 +109,20 @@ class DatabaseIntegrationTest {
     @Autowired
     private UserProfileRepository userProfileRepository;
 
+    @Autowired
+    private FavoriteDishRepository favoriteDishRepository;
+
+    @Autowired
+    private WaterLogRepository waterLogRepository;
+
+    @Autowired
+    private BodyMeasurementRepository measurementRepository;
+
     @PersistenceContext
     private EntityManager entityManager;
 
     @Test
-    void flyway_migratesEveryVersionUpToV10Successfully() throws SQLException {
+    void flyway_migratesEveryVersionUpToV13Successfully() throws SQLException {
         List<String> versions = new ArrayList<>();
         try (Connection connection = dataSource.getConnection();
                 Statement statement = connection.createStatement();
@@ -118,7 +133,7 @@ class DatabaseIntegrationTest {
                 versions.add(resultSet.getString("version"));
             }
         }
-        assertThat(versions).contains("1", "2", "3", "4", "5", "6", "7", "8", "9", "10");
+        assertThat(versions).contains("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13");
     }
 
     @Test
@@ -356,5 +371,127 @@ class DatabaseIntegrationTest {
 
         assertThat(match).isPresent();
         assertThat(match.orElseThrow().getFdcId()).isEqualTo(900000001L);
+    }
+
+    @Test
+    void favoriteDish_roundTripsJsonbIngredientsThroughTheRealDatabase() {
+        UUID userId = UUID.randomUUID();
+        List<FoodEntryIngredient> ingredients = List.of(new FoodEntryIngredient(
+                "Carne",
+                new BigDecimal("120.00"),
+                new BigDecimal("250.00"),
+                new BigDecimal("26.00"),
+                new BigDecimal("15.00"),
+                new BigDecimal("0.00"),
+                new BigDecimal("0.00"),
+                new BigDecimal("0.00"),
+                new BigDecimal("70.00"),
+                FoodSource.USDA,
+                null));
+        FavoriteDish favorite = new FavoriteDish(userId, "milanesa");
+        favorite.applyDish(
+                MealType.ALMUERZO,
+                "Milanesa",
+                new BigDecimal("120.00"),
+                new BigDecimal("250.00"),
+                new BigDecimal("26.00"),
+                new BigDecimal("15.00"),
+                new BigDecimal("0.00"),
+                new BigDecimal("0.00"),
+                new BigDecimal("0.00"),
+                new BigDecimal("70.00"),
+                FoodSource.USDA,
+                null,
+                ingredients);
+
+        FavoriteDish saved = favoriteDishRepository.saveAndFlush(favorite);
+        entityManager.clear();
+
+        FavoriteDish reloaded = favoriteDishRepository.findById(saved.getId()).orElseThrow();
+        assertThat(reloaded.getMealType()).isEqualTo(MealType.ALMUERZO);
+        assertThat(reloaded.getIngredients()).hasSize(1);
+        assertThat(reloaded.getIngredients().get(0).name()).isEqualTo("Carne");
+    }
+
+    @Test
+    void favoriteDish_uniqueUserAndNormalizedNameConstraint_rejectsADuplicate() {
+        UUID userId = UUID.randomUUID();
+        FavoriteDish first = new FavoriteDish(userId, "milanesa");
+        first.applyDish(
+                null,
+                "Milanesa",
+                new BigDecimal("120.00"),
+                new BigDecimal("250.00"),
+                new BigDecimal("26.00"),
+                new BigDecimal("15.00"),
+                new BigDecimal("0.00"),
+                new BigDecimal("0.00"),
+                new BigDecimal("0.00"),
+                new BigDecimal("70.00"),
+                FoodSource.MANUAL,
+                null,
+                null);
+        favoriteDishRepository.saveAndFlush(first);
+
+        assertThatThrownBy(() -> {
+            try (Connection connection = dataSource.getConnection();
+                    Statement statement = connection.createStatement()) {
+                statement.executeUpdate(
+                        """
+                        INSERT INTO app.favorite_dish
+                            (user_id, normalized_name, name, grams, kcal_per_100, protein_per_100,
+                             fat_per_100, carbs_per_100, fiber_per_100, sugar_per_100, sodium_mg_per_100, source)
+                        VALUES
+                            ('%s', 'milanesa', 'Milanesa otra vez', 100, 100, 5, 5, 5, 1, 1, 50, 'MANUAL')
+                        """
+                                .formatted(userId));
+            }
+        }).isInstanceOf(SQLException.class);
+    }
+
+    @Test
+    void waterLog_roundTripsCompositePrimaryKeyThroughTheRealDatabase() {
+        UUID userId = UUID.randomUUID();
+        LocalDate date = LocalDate.of(2026, 9, 25);
+        waterLogRepository.saveAndFlush(new WaterLog(userId, date, 750));
+        entityManager.clear();
+
+        WaterLog reloaded = waterLogRepository.findByUserIdAndEntryDate(userId, date).orElseThrow();
+        assertThat(reloaded.getMl()).isEqualTo(750);
+
+        // Bypasses the Java layer entirely -- proves the DB-level CHECK constraint itself rejects
+        // a negative total, independent of WaterLogService's own floor-at-0 application logic.
+        assertThatThrownBy(() -> {
+            try (Connection connection = dataSource.getConnection();
+                    Statement statement = connection.createStatement()) {
+                statement.executeUpdate(
+                        "INSERT INTO app.water_log (user_id, entry_date, ml) VALUES ('%s', '2026-09-26', -1)"
+                                .formatted(UUID.randomUUID()));
+            }
+        }).isInstanceOf(SQLException.class);
+    }
+
+    @Test
+    void bodyMeasurement_roundTripsAndUniqueConstraintThroughTheRealDatabase() {
+        UUID userId = UUID.randomUUID();
+        LocalDate date = LocalDate.of(2026, 9, 25);
+        BodyMeasurement measurement = new BodyMeasurement(userId, date);
+        measurement.setWaistCm(new BigDecimal("82.50"));
+        measurement.setBodyFatPct(new BigDecimal("18.5"));
+        measurementRepository.saveAndFlush(measurement);
+        entityManager.clear();
+
+        BodyMeasurement reloaded = measurementRepository.findByUserIdAndMeasuredOn(userId, date).orElseThrow();
+        assertThat(reloaded.getWaistCm()).isEqualByComparingTo("82.50");
+        assertThat(reloaded.getBodyFatPct()).isEqualByComparingTo("18.5");
+
+        assertThatThrownBy(() -> {
+            try (Connection connection = dataSource.getConnection();
+                    Statement statement = connection.createStatement()) {
+                statement.executeUpdate(
+                        "INSERT INTO app.body_measurement (user_id, measured_on, waist_cm) VALUES ('%s', '%s', 90)"
+                                .formatted(userId, date));
+            }
+        }).isInstanceOf(SQLException.class);
     }
 }

@@ -17,13 +17,13 @@ import java.math.BigDecimal;
 public record FoodEntryIngredientRequest(
         @NotBlank String name,
         @NotNull @DecimalMin(value = "0.1") @DecimalMax(value = "5000") BigDecimal grams,
-        @NotNull @DecimalMin("0.0") BigDecimal kcalPer100,
-        @NotNull @DecimalMin("0.0") BigDecimal proteinPer100,
-        @NotNull @DecimalMin("0.0") BigDecimal fatPer100,
-        @NotNull @DecimalMin("0.0") BigDecimal carbsPer100,
-        @NotNull @DecimalMin("0.0") BigDecimal fiberPer100,
-        @NotNull @DecimalMin("0.0") BigDecimal sugarPer100,
-        @NotNull @DecimalMin("0.0") BigDecimal sodiumMgPer100,
+        @NotNull @DecimalMin("0.0") @DecimalMax("900") BigDecimal kcalPer100,
+        @NotNull @DecimalMin("0.0") @DecimalMax("100") BigDecimal proteinPer100,
+        @NotNull @DecimalMin("0.0") @DecimalMax("100") BigDecimal fatPer100,
+        @NotNull @DecimalMin("0.0") @DecimalMax("100") BigDecimal carbsPer100,
+        @NotNull @DecimalMin("0.0") @DecimalMax("100") BigDecimal fiberPer100,
+        @NotNull @DecimalMin("0.0") @DecimalMax("100") BigDecimal sugarPer100,
+        @NotNull @DecimalMin("0.0") @DecimalMax("40000") BigDecimal sodiumMgPer100,
         @NotNull FoodSource source,
         Long fdcId) {
 

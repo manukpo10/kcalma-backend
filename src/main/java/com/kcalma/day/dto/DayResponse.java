@@ -15,7 +15,11 @@ public record DayResponse(
         NutritionMath.Totals consumed,
         NutritionMath.Totals remaining,
         Exceeded exceeded,
-        Map<MealType, List<FoodEntryResponse>> meals) {
+        Map<MealType, List<FoodEntryResponse>> meals,
+        Water water) {
 
     public record Exceeded(boolean kcal, boolean sugar, boolean sodium) {}
+
+    /** {@code targetMl} is the same 35 ml/kg target {@code NutritionCalculator} derives from the profile (see {@code targets.waterMl()}). */
+    public record Water(int consumedMl, int targetMl) {}
 }

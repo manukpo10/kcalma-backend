@@ -201,7 +201,8 @@ class SuggestionServiceTest {
                 consumed,
                 remaining,
                 new DayResponse.Exceeded(remaining.kcal() < 0, false, false),
-                meals);
+                meals,
+                new DayResponse.Water(0, 2500));
     }
 
     private ProfileWithTargetsResponse sampleProfile(DietStyle dietStyle, List<DietaryRestriction> restrictions) {

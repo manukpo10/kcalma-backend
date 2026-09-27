@@ -3,6 +3,11 @@ package com.kcalma.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.kcalma.checkin.CheckinStatus;
+import com.kcalma.checkin.Confidence;
+import com.kcalma.checkin.TdeeAdaptationCalculator;
+import com.kcalma.checkin.TdeeCheckin;
+import com.kcalma.checkin.TdeeCheckinRepository;
 import com.kcalma.favorites.FavoriteDish;
 import com.kcalma.favorites.FavoriteDishRepository;
 import com.kcalma.food.FoodEntry;
@@ -38,6 +43,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -118,11 +124,14 @@ class DatabaseIntegrationTest {
     @Autowired
     private BodyMeasurementRepository measurementRepository;
 
+    @Autowired
+    private TdeeCheckinRepository checkinRepository;
+
     @PersistenceContext
     private EntityManager entityManager;
 
     @Test
-    void flyway_migratesEveryVersionUpToV13Successfully() throws SQLException {
+    void flyway_migratesEveryVersionUpToV14Successfully() throws SQLException {
         List<String> versions = new ArrayList<>();
         try (Connection connection = dataSource.getConnection();
                 Statement statement = connection.createStatement();
@@ -133,7 +142,7 @@ class DatabaseIntegrationTest {
                 versions.add(resultSet.getString("version"));
             }
         }
-        assertThat(versions).contains("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13");
+        assertThat(versions).contains("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14");
     }
 
     @Test
@@ -493,5 +502,72 @@ class DatabaseIntegrationTest {
                                 .formatted(userId, date));
             }
         }).isInstanceOf(SQLException.class);
+    }
+
+    @Test
+    void tdeeCheckin_roundTripsThroughAcceptAndTheUniqueConstraintThroughTheRealDatabase() {
+        UUID userId = UUID.randomUUID();
+        LocalDate weekStart = LocalDate.of(2026, 9, 21);
+        TdeeCheckin checkin = new TdeeCheckin(userId, weekStart);
+        checkin.recompute(
+                LocalDate.of(2026, 8, 31), LocalDate.of(2026, 9, 20), 2759,
+                new TdeeAdaptationCalculator.Result(
+                        CheckinStatus.PENDING, 15, 8, 2100, -0.9, 2430, 2620, Confidence.MEDIUM, List.of()));
+        checkinRepository.saveAndFlush(checkin);
+        entityManager.clear(); // force the next read to actually hit the DB, not the session cache
+
+        TdeeCheckin reloaded = checkinRepository.findByUserIdAndWeekStart(userId, weekStart).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo(CheckinStatus.PENDING);
+        assertThat(reloaded.getCompleteDays()).isEqualTo(15);
+        assertThat(reloaded.getWeighIns()).isEqualTo(8);
+        assertThat(reloaded.getAvgIntakeKcal()).isEqualTo(2100);
+        assertThat(reloaded.getTrendChangeKg()).isEqualTo(-0.9);
+        assertThat(reloaded.getFormulaTdee()).isEqualTo(2759);
+        assertThat(reloaded.getEstimatedTdee()).isEqualTo(2430);
+        assertThat(reloaded.getProposedTdee()).isEqualTo(2620);
+        assertThat(reloaded.getConfidence()).isEqualTo(Confidence.MEDIUM);
+        assertThat(reloaded.getAppliedTdee()).isNull();
+        assertThat(reloaded.getDecidedAt()).isNull();
+
+        reloaded.accept(ActivityLevel.MODERATELY_ACTIVE, OffsetDateTime.now());
+        checkinRepository.saveAndFlush(reloaded);
+        entityManager.clear();
+
+        TdeeCheckin accepted = checkinRepository.findByUserIdAndWeekStart(userId, weekStart).orElseThrow();
+        assertThat(accepted.getStatus()).isEqualTo(CheckinStatus.ACCEPTED);
+        assertThat(accepted.getAppliedTdee()).isEqualTo(2620);
+        assertThat(accepted.getAppliedActivityLevel()).isEqualTo(ActivityLevel.MODERATELY_ACTIVE);
+        assertThat(accepted.getDecidedAt()).isNotNull();
+        assertThat(checkinRepository.findFirstByUserIdAndStatusOrderByWeekStartDesc(userId, CheckinStatus.ACCEPTED))
+                .map(TdeeCheckin::getId)
+                .contains(accepted.getId());
+
+        // UNIQUE (user_id, week_start): bypasses the Java layer entirely -- proves the DB-level
+        // constraint itself rejects a second row for the same user+week, independent of the
+        // findByUserIdAndWeekStart-then-update path CheckinService always takes in practice.
+        assertThatThrownBy(() -> {
+            try (Connection connection = dataSource.getConnection();
+                    Statement statement = connection.createStatement()) {
+                statement.executeUpdate(
+                        "INSERT INTO app.tdee_checkin (user_id, week_start, status, window_start, window_end) "
+                                + "VALUES ('%s', '%s', 'PENDING', '2026-08-31', '2026-09-20')"
+                                        .formatted(userId, weekStart));
+            }
+        }).isInstanceOf(SQLException.class);
+    }
+
+    @Test
+    void tdeeCheckin_statusCheckConstraint_rejectsGarbage() {
+        assertThatThrownBy(() -> {
+            try (Connection connection = dataSource.getConnection();
+                    Statement statement = connection.createStatement()) {
+                statement.executeUpdate(
+                        "INSERT INTO app.tdee_checkin (user_id, week_start, status, window_start, window_end) "
+                                + "VALUES ('%s', '2026-09-21', 'GARBAGE', '2026-08-31', '2026-09-20')"
+                                        .formatted(UUID.randomUUID()));
+            }
+        })
+                .isInstanceOf(SQLException.class)
+                .hasMessageContaining("tdee_checkin_status_check");
     }
 }

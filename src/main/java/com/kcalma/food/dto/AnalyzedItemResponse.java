@@ -1,5 +1,6 @@
 package com.kcalma.food.dto;
 
+import com.kcalma.food.FoodEntryIngredient;
 import com.kcalma.food.FoodSource;
 import com.kcalma.food.analysis.AnalyzedFoodItem;
 import com.kcalma.food.reference.ResolvedFoodItem;
@@ -58,6 +59,28 @@ public record AnalyzedItemResponse(
                 item.source(),
                 item.fdcId(),
                 item.matchedDescription());
+    }
+
+    /**
+     * A previously-saved/persisted ingredient (favorites, recent dishes) re-shown in Dish form —
+     * already rounded/persisted values, so no {@code round(...)} pass is applied here unlike the
+     * two factories above. {@code matchedDescription} is a preview-only detail never persisted
+     * alongside a {@link FoodEntryIngredient} (see its own javadoc) — always {@code null} here.
+     */
+    public static AnalyzedItemResponse from(FoodEntryIngredient ingredient) {
+        return new AnalyzedItemResponse(
+                ingredient.name(),
+                ingredient.grams(),
+                ingredient.kcalPer100(),
+                ingredient.proteinPer100(),
+                ingredient.fatPer100(),
+                ingredient.carbsPer100(),
+                ingredient.fiberPer100(),
+                ingredient.sugarPer100(),
+                ingredient.sodiumMgPer100(),
+                ingredient.source(),
+                ingredient.fdcId(),
+                null);
     }
 
     private static BigDecimal round(double value) {

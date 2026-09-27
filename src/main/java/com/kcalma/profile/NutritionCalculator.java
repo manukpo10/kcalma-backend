@@ -44,13 +44,22 @@ public final class NutritionCalculator {
     private static final double KCAL_PER_KG_OF_BODY_MASS = 7700.0;
 
     public NutritionTargets calculate(Input input) {
+        return calculate(input, tdee(input));
+    }
+
+    /**
+     * Same pipeline as {@link #calculate(Input)}, but with an explicit TDEE in place of BMR x
+     * activity — every other rule (goal/pace adjustment, the 25% deficit cap, the floor,
+     * protein/macros) stays identical. Used by the adaptive check-in ({@code
+     * com.kcalma.checkin.CheckinService} via {@code com.kcalma.checkin.AdaptiveTdeeService}) once
+     * a week's adaptive TDEE has been accepted, so targets blend in that smoothed real-world
+     * number instead of the formula's estimate.
+     */
+    public NutritionTargets calculate(Input input, double tdee) {
         Objects.requireNonNull(input.dietStyle(), "dietStyle");
         if (input.goal().requiresPace() && input.pace() == null) {
             throw new IllegalArgumentException("pace is required for goal " + input.goal());
         }
-
-        double bmr = bmr(input);
-        double tdee = bmr * input.activityLevel().factor();
 
         RateResult rate = weeklyRate(input.goal(), input.pace(), input.weightKg(), tdee);
 
@@ -107,6 +116,17 @@ public final class NutritionCalculator {
     private double bmr(Input input) {
         double base = 10 * input.weightKg() + 6.25 * input.heightCm() - 5 * input.ageYears();
         return input.sex() == Sex.MALE ? base + 5 : base - 161;
+    }
+
+    /**
+     * BMR (Mifflin-St Jeor) x activity factor — the baseline "formula" TDEE, before any goal/pace
+     * adjustment. Exposed publicly (unlike {@link #bmr}) for the adaptive check-in ({@code
+     * com.kcalma.checkin.CheckinService}), which needs it both as the {@code formulaTdee} it
+     * reports and as the {@code currentTdee} fallback when the user has no accepted adaptive week
+     * yet — see {@link #calculate(Input, double)}.
+     */
+    public double tdee(Input input) {
+        return bmr(input) * input.activityLevel().factor();
     }
 
     /**

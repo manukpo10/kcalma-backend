@@ -319,4 +319,56 @@ class NutritionCalculatorTest {
         assertThat(Goal.LOSE_FAT.benefitsFromStrengthTraining()).isFalse();
         assertThat(Goal.MAINTAIN.benefitsFromStrengthTraining()).isFalse();
     }
+
+    // --- Sprint 3a: the explicit-TDEE overload the adaptive check-in blends in (see
+    // com.kcalma.checkin.CheckinService / AdaptiveTdeeService) instead of BMR x activity. ---
+
+    @Test
+    void tdee_moderatelyActiveMale_matchesBmrTimesActivityFactor() {
+        // Same profile as the very first test: BMR = 1780, activity factor 1.55 -> TDEE = 2759.
+        Input input = new Input(
+                Sex.MALE, 30, 180, 80, ActivityLevel.MODERATELY_ACTIVE, Goal.MAINTAIN, null, DietStyle.BALANCED, false, null);
+
+        assertThat(calculator.tdee(input)).isEqualTo(2759.0);
+    }
+
+    @Test
+    void calculate_withExplicitTdee_matchesTheSingleArgOverload_whenGivenItsOwnFormulaTdee() {
+        Input input = new Input(
+                Sex.MALE, 34, 168, 112.9, ActivityLevel.LIGHTLY_ACTIVE, Goal.LOSE_FAT, Pace.MODERATE, DietStyle.BALANCED, true, 43.9);
+
+        NutritionTargets viaFormula = calculator.calculate(input);
+        NutritionTargets viaExplicitTdee = calculator.calculate(input, calculator.tdee(input));
+
+        assertThat(viaExplicitTdee).isEqualTo(viaFormula);
+    }
+
+    @Test
+    void calculate_withExplicitTdee_usesItInsteadOfTheFormulaForAMaintainGoal() {
+        // MAINTAIN has no goal/pace adjustment of its own, so calories should track the override
+        // (2400) exactly -- not the formula's 2759 -- proving the pipeline used it as the base.
+        Input input = new Input(
+                Sex.MALE, 30, 180, 80, ActivityLevel.MODERATELY_ACTIVE, Goal.MAINTAIN, null, DietStyle.BALANCED, false, null);
+
+        NutritionTargets targets = calculator.calculate(input, 2400.0);
+
+        assertThat(targets.calories()).isEqualTo(2400);
+        assertThat(targets.floorApplied()).isFalse();
+    }
+
+    @Test
+    void calculate_withExplicitTdee_computesTheDeficitCapRelativeToTheOverrideNotTheFormula() {
+        // FAST loss is a fixed 1% of body weight/week regardless of TDEE: 80kg -> -0.8 kg/week ->
+        // -880 kcal/day, uncapped. With the FORMULA tdee (2759) the 25% cap (-689.75) would already
+        // bind; with this override (2000) instead the cap is tighter still (-500), and the
+        // resulting calories (2000 - 500 = 1500) prove the cap used the override, not the 2759.
+        Input input = new Input(
+                Sex.MALE, 30, 180, 80, ActivityLevel.MODERATELY_ACTIVE, Goal.LOSE_WEIGHT, Pace.FAST, DietStyle.BALANCED, false, null);
+
+        NutritionTargets targets = calculator.calculate(input, 2000.0);
+
+        assertThat(targets.dailyAdjustmentKcal()).isEqualTo(-500.0);
+        assertThat(targets.calories()).isEqualTo(1500);
+        assertThat(targets.notes()).extracting(NutritionCalculator.TargetNote::code).containsExactly(NoteCode.RATE_CAPPED);
+    }
 }

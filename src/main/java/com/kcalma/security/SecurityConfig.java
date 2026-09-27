@@ -1,7 +1,6 @@
 package com.kcalma.security;
 
 import java.util.List;
-import java.util.Set;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -30,9 +29,14 @@ import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 /**
- * Stateless resource-server security: Supabase-issued ES256 JWTs only, owner allowlist as an
- * authorization decision (not a token validator) so an anonymous/invalid request gets 401 and an
- * authenticated-but-not-owner request gets 403.
+ * Stateless resource-server security: Supabase-issued ES256 JWTs only. Open registration — any
+ * authenticated Supabase user from this project is let in, since Supabase sign-ups stay behind
+ * the frontend's own gate. The admission check is an authorization decision (not a token
+ * validator) so a missing/invalid/expired token gets 401, while a structurally valid JWT for a
+ * Supabase anonymous sign-in ({@code is_anonymous: true}) gets 403 — anonymous guests never get a
+ * user account worth persisting data against. {@code OWNER_USER_IDS} (see {@link
+ * AppSecurityProperties}) no longer gates access at all; it now marks admins, used only to skip
+ * the global Gemini usage cap.
  */
 @Configuration
 @EnableConfigurationProperties(AppSecurityProperties.class)
@@ -64,7 +68,7 @@ public class SecurityConfig {
                     if (swaggerEnabled) {
                         auth.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll();
                     }
-                    auth.requestMatchers("/api/**").access(ownerOnly());
+                    auth.requestMatchers("/api/**").access(authenticatedNonAnonymous());
                     auth.anyRequest().authenticated();
                 })
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.decoder(jwtDecoder())));
@@ -99,19 +103,30 @@ public class SecurityConfig {
     }
 
     /**
-     * Anonymous/invalid token -&gt; not granted, trustResolver sees anonymous -&gt; entry point -&gt; 401.
-     * Authenticated JWT whose subject is not in the allowlist -&gt; not granted, but not anonymous
-     * -&gt; access-denied handler -&gt; 403. Authenticated owner -&gt; granted -&gt; 200.
+     * Missing/invalid/expired token -&gt; Spring Security never authenticates it -&gt; {@code
+     * trustResolver.isAnonymous} sees the framework's own anonymous placeholder authentication -&gt;
+     * entry point -&gt; 401. A structurally valid JWT for a Supabase ANONYMOUS sign-in (distinct
+     * concept: {@code is_anonymous: true} in the token's own claims, not Spring Security's
+     * anonymous-authentication placeholder) -&gt; authenticated but not granted -&gt; access-denied
+     * handler -&gt; 403. Any other authenticated Supabase user -&gt; granted -&gt; 2xx.
      */
-    private AuthorizationManager<RequestAuthorizationContext> ownerOnly() {
-        Set<String> ownerIds = properties.getOwnerUserIds();
+    private AuthorizationManager<RequestAuthorizationContext> authenticatedNonAnonymous() {
         return (authenticationSupplier, context) -> {
             Authentication authentication = authenticationSupplier.get();
             boolean granted = !trustResolver.isAnonymous(authentication)
                     && authentication instanceof JwtAuthenticationToken jwtAuth
                     && authentication.isAuthenticated()
-                    && ownerIds.contains(jwtAuth.getToken().getSubject());
+                    && !isSupabaseAnonymousUser(jwtAuth.getToken());
             return new AuthorizationDecision(granted);
         };
+    }
+
+    /**
+     * Supabase stamps every anonymous sign-in's JWT with a top-level {@code is_anonymous: true}
+     * claim (the same one RLS policies check via {@code auth.jwt() ->> 'is_anonymous'}); a regular
+     * user's token either omits the claim or carries it as {@code false}.
+     */
+    private static boolean isSupabaseAnonymousUser(Jwt token) {
+        return Boolean.TRUE.equals(token.getClaimAsBoolean("is_anonymous"));
     }
 }

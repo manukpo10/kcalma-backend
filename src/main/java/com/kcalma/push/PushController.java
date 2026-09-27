@@ -18,7 +18,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-/** Owner-only (see {@code com.kcalma.security.SecurityConfig}'s blanket {@code /api/**} rule) — no extra security wiring needed here. */
+/** Open to any authenticated user (see {@code com.kcalma.security.SecurityConfig}'s blanket {@code /api/**} rule) — no extra security wiring needed here. */
 @RestController
 @RequestMapping("/api/push")
 public class PushController {

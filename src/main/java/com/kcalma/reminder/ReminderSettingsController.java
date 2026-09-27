@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Owner-only (see {@code com.kcalma.security.SecurityConfig}'s blanket {@code /api/**} rule) — no extra security wiring needed here. */
+/** Open to any authenticated user (see {@code com.kcalma.security.SecurityConfig}'s blanket {@code /api/**} rule) — no extra security wiring needed here. */
 @RestController
 @RequestMapping("/api/reminders")
 public class ReminderSettingsController {

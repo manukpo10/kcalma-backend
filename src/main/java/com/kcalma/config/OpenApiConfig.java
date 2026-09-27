@@ -15,8 +15,9 @@ import org.springframework.context.annotation.Configuration;
  * security filter chain behind the same flag.
  *
  * <p>Declares a bearer JWT scheme so "Authorize" in Swagger UI accepts a Supabase access token
- * for the owner-only {@code /api/**} endpoints, which is effectively the app's whole documented
- * surface (the only other route, {@code /actuator/health}, isn't part of the OpenAPI docs).
+ * for the {@code /api/**} endpoints (open to any authenticated, non-anonymous Supabase user — see
+ * {@code SecurityConfig}), which is effectively the app's whole documented surface (the only other
+ * route, {@code /actuator/health}, isn't part of the OpenAPI docs).
  */
 @Configuration
 public class OpenApiConfig {

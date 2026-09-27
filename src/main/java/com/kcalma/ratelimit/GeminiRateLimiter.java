@@ -1,5 +1,6 @@
 package com.kcalma.ratelimit;
 
+import com.kcalma.security.AppSecurityProperties;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -16,10 +17,13 @@ import org.springframework.stereotype.Component;
  * against the same quota. Two windows apply, either one can reject a request:
  *
  * <ul>
- *   <li>a short sliding window ({@code app.rate-limit.window-requests} per {@code
- *       app.rate-limit.window-minutes}, default 20 per 10 minutes) — protects against bursts;
- *   <li>a daily sliding window ({@code app.rate-limit.daily-requests}, default 150 per 24h) —
- *       protects the free-tier Gemini quota over a whole day.
+ *   <li>a short sliding window ({@code app.rate-limit.window-requests}, env {@code
+ *       GEMINI_USER_PER_10MIN}, per {@code app.rate-limit.window-minutes}, default 20 per 10
+ *       minutes) — protects against bursts, and applies to EVERY user, admins included;
+ *   <li>a daily sliding window ({@code app.rate-limit.daily-requests}, env {@code
+ *       GEMINI_USER_PER_DAY}, default 50 per 24h) — protects one project's free-tier Gemini quota
+ *       being shared by every user now that sign-up is open; admins skip this one (see {@link
+ *       AppSecurityProperties#isAdmin(String)}).
  * </ul>
  *
  * <p>Implementation: a sliding-window log per user (a deque of request timestamps), pruned to the
@@ -28,6 +32,12 @@ import org.springframework.stereotype.Component;
  * safety is per-user (synchronized per {@link RequestWindow} instance), so users never contend
  * with each other; process-local only (not shared across instances), which is fine for this app's
  * single-instance Render deployment.
+ *
+ * <p>Also the single call site every Gemini endpoint goes through for the app-WIDE cap: after the
+ * per-user check passes (or is disabled), this delegates to {@link GeminiGlobalRateLimiter} unless
+ * {@code userId} is an admin, who skips the global cap entirely (same admin check as the per-user
+ * daily window above). Controllers call {@link #checkAndRecord(String)} once and never need to know
+ * the global cap or the admin allowlist exist.
  */
 @Component
 @EnableConfigurationProperties(RateLimitProperties.class)
@@ -36,26 +46,42 @@ public class GeminiRateLimiter {
     private static final Duration DAILY_WINDOW = Duration.ofDays(1);
 
     private final RateLimitProperties properties;
+    private final GeminiGlobalRateLimiter globalRateLimiter;
+    private final AppSecurityProperties securityProperties;
     private final Clock clock;
     private final ConcurrentHashMap<String, RequestWindow> windowsByUser = new ConcurrentHashMap<>();
 
-    public GeminiRateLimiter(RateLimitProperties properties, Clock clock) {
+    public GeminiRateLimiter(
+            RateLimitProperties properties,
+            GeminiGlobalRateLimiter globalRateLimiter,
+            AppSecurityProperties securityProperties,
+            Clock clock) {
         this.properties = properties;
+        this.globalRateLimiter = globalRateLimiter;
+        this.securityProperties = securityProperties;
         this.clock = clock;
     }
 
     /**
-     * Records one request for {@code userId} if under both quotas.
+     * Records one request for {@code userId} if under every applicable quota: first this user's
+     * own short burst window (always enforced, unless {@code app.rate-limit.enabled} is false) and
+     * daily window (skipped for admins), then — again skipped for admins — the app-wide shared cap.
      *
-     * @throws RateLimitExceededException if either the short or the daily window is exhausted;
-     *     carries how many seconds until the oldest request in the exceeded window ages out
+     * @throws RateLimitExceededException if {@code userId}'s own short window is exhausted, or
+     *     (non-admins only) their own daily window is; carries how many seconds until the oldest
+     *     request in the exceeded window ages out
+     * @throws GlobalAiCapExceededException if the app-wide shared cap is exhausted and {@code
+     *     userId} is not an admin
      */
     public void checkAndRecord(String userId) {
-        if (!properties.isEnabled()) {
-            return;
+        boolean admin = securityProperties.isAdmin(userId);
+        if (properties.isEnabled()) {
+            RequestWindow window = windowsByUser.computeIfAbsent(userId, key -> new RequestWindow());
+            window.checkAndRecord(clock.instant(), properties, admin);
         }
-        RequestWindow window = windowsByUser.computeIfAbsent(userId, key -> new RequestWindow());
-        window.checkAndRecord(clock.instant(), properties);
+        if (!admin) {
+            globalRateLimiter.checkAndRecord();
+        }
     }
 
     /** Per-user sliding-window request log. All access is synchronized on the instance itself. */
@@ -63,7 +89,11 @@ public class GeminiRateLimiter {
 
         private final Deque<Instant> timestamps = new ArrayDeque<>();
 
-        synchronized void checkAndRecord(Instant now, RateLimitProperties properties) {
+        /**
+         * @param skipDailyCap true for admins: the daily window is still pruned/maintained (so the
+         *     burst-window count above stays accurate) but never itself rejects the call.
+         */
+        synchronized void checkAndRecord(Instant now, RateLimitProperties properties, boolean skipDailyCap) {
             Instant dailyCutoff = now.minus(DAILY_WINDOW);
             for (Iterator<Instant> it = timestamps.iterator(); it.hasNext(); ) {
                 if (it.next().isBefore(dailyCutoff)) {
@@ -86,11 +116,12 @@ public class GeminiRateLimiter {
                     }
                 }
             }
+            // The short burst window applies to every user, admins included -- never skipped.
             if (countInWindow >= properties.getWindowRequests()) {
                 throw retryAfter(now, oldestInWindow.plus(windowDuration));
             }
 
-            if (timestamps.size() >= properties.getDailyRequests()) {
+            if (!skipDailyCap && timestamps.size() >= properties.getDailyRequests()) {
                 throw retryAfter(now, timestamps.peekFirst().plus(DAILY_WINDOW));
             }
 

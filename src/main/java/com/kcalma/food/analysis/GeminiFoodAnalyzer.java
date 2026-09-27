@@ -1,5 +1,6 @@
 package com.kcalma.food.analysis;
 
+import com.kcalma.ratelimit.GlobalAiCapExceededException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -7,6 +8,7 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -41,6 +43,9 @@ public class GeminiFoodAnalyzer implements FoodAnalyzer {
     private static final Logger log = LoggerFactory.getLogger(GeminiFoodAnalyzer.class);
 
     private static final String GENERIC_ERROR = "No se pudo analizar la comida. Probá de nuevo.";
+
+    /** Used when Gemini's own 429 response carries no (or an unparseable) Retry-After header. */
+    private static final long DEFAULT_RETRY_AFTER_SECONDS = 60;
 
     private static final String PHOTO_PROMPT =
             """
@@ -161,8 +166,9 @@ public class GeminiFoodAnalyzer implements FoodAnalyzer {
         } catch (HttpStatusCodeException e) {
             log.warn("Gemini request failed with status {}", e.getStatusCode());
             if (e.getStatusCode().value() == 429) {
-                throw new FoodAnalysisException(
-                        "Se alcanzó el límite de uso gratuito de Gemini. Probá de nuevo en unos minutos.", e);
+                // Gemini's own quota is exhausted -- same app-wide "AI is saturated" response the
+                // global rate limiter gives, never the generic 502 below (see GlobalExceptionHandler).
+                throw globalAiCapExceededFrom(e);
             }
             throw new FoodAnalysisException(
                     "El servicio de análisis no está disponible en este momento.", e);
@@ -174,6 +180,20 @@ public class GeminiFoodAnalyzer implements FoodAnalyzer {
             log.warn("Unexpected Gemini client error", e);
             throw new FoodAnalysisException(GENERIC_ERROR, e);
         }
+    }
+
+    /** Prefers Gemini's own {@code Retry-After} header when present and parseable; otherwise a sane default. */
+    private static GlobalAiCapExceededException globalAiCapExceededFrom(HttpStatusCodeException e) {
+        HttpHeaders headers = e.getResponseHeaders();
+        String header = headers != null ? headers.getFirst(HttpHeaders.RETRY_AFTER) : null;
+        if (header != null) {
+            try {
+                return new GlobalAiCapExceededException(Math.max(Long.parseLong(header.trim()), 1));
+            } catch (NumberFormatException ignored) {
+                // falls through to the default below
+            }
+        }
+        return new GlobalAiCapExceededException(DEFAULT_RETRY_AFTER_SECONDS);
     }
 
     ObjectNode buildRequestBody(byte[] imageBytes, String mimeType) {

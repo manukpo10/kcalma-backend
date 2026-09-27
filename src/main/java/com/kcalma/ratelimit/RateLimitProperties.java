@@ -4,10 +4,16 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
 /**
- * Backed by env vars RATE_LIMIT_ENABLED, RATE_LIMIT_WINDOW_REQUESTS, RATE_LIMIT_WINDOW_MINUTES,
- * RATE_LIMIT_DAILY_REQUESTS (see application.yml). Governs {@link GeminiRateLimiter}, shared
- * across the three Gemini-backed endpoints (/api/food/analyze, /api/food/analyze-text,
- * /api/suggestions) and keyed per user (JWT {@code sub}).
+ * Backed by env vars RATE_LIMIT_ENABLED, GEMINI_USER_PER_10MIN, RATE_LIMIT_WINDOW_MINUTES,
+ * GEMINI_USER_PER_DAY (see application.yml). Governs {@link GeminiRateLimiter}, shared across the
+ * three Gemini-backed endpoints (/api/food/analyze, /api/food/analyze-text, /api/suggestions) and
+ * keyed per user (JWT {@code sub}).
+ *
+ * <p>{@code dailyRequests}' default was lowered from a single-owner-era 150 to 50: with open
+ * registration, a handful of users now share one Supabase project's free Gemini quota (see {@code
+ * GlobalRateLimitProperties} for the app-wide cap this sits underneath). Admins ({@code
+ * OWNER_USER_IDS}) skip {@code dailyRequests} entirely (see {@link GeminiRateLimiter}) but never
+ * {@code windowRequests} — the short burst window still applies to everyone, admins included.
  */
 @ConfigurationProperties(prefix = "app.rate-limit")
 @Validated
@@ -19,7 +25,7 @@ public class RateLimitProperties {
 
     private int windowMinutes = 10;
 
-    private int dailyRequests = 150;
+    private int dailyRequests = 50;
 
     public boolean isEnabled() {
         return enabled;

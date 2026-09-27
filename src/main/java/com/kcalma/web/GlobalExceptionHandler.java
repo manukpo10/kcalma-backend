@@ -1,5 +1,6 @@
 package com.kcalma.web;
 
+import com.kcalma.ratelimit.GlobalAiCapExceededException;
 import com.kcalma.ratelimit.RateLimitExceededException;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -48,6 +49,8 @@ public class GlobalExceptionHandler {
     private static final String UNSUPPORTED_MEDIA_TYPE_MESSAGE = "El tipo de contenido de la solicitud no es compatible.";
     private static final String METHOD_NOT_ALLOWED_MESSAGE = "El método HTTP utilizado no está permitido para este recurso.";
     private static final String RATE_LIMIT_MESSAGE = "Llegaste al límite de análisis por ahora. Probá de nuevo en unos minutos.";
+    private static final String GLOBAL_AI_CAP_MESSAGE =
+            "La IA está saturada en este momento. Probá en un rato o cargá la comida a mano.";
     private static final String UNEXPECTED_MESSAGE = "Ocurrió un error inesperado.";
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -74,6 +77,19 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .header(HttpHeaders.RETRY_AFTER, String.valueOf(ex.getRetryAfterSeconds()))
                 .body(Map.of("message", RATE_LIMIT_MESSAGE));
+    }
+
+    /**
+     * The app-wide Gemini cap is exhausted — either {@code GeminiGlobalRateLimiter} rejected the
+     * call, or Gemini's own API answered 429 (see {@code GeminiFoodAnalyzer}/{@code
+     * GeminiMealSuggester}). Distinct message from {@link #handleRateLimit}: this is "everyone is
+     * saturated right now", not "you personally hit your own limit".
+     */
+    @ExceptionHandler(GlobalAiCapExceededException.class)
+    public ResponseEntity<Map<String, String>> handleGlobalAiCap(GlobalAiCapExceededException ex) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(ex.getRetryAfterSeconds()))
+                .body(Map.of("message", GLOBAL_AI_CAP_MESSAGE));
     }
 
     /** Malformed/unreadable JSON body on any {@code @RequestBody} — never echoes the parser's own message. */

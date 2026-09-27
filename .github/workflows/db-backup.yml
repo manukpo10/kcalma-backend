@@ -1,0 +1,55 @@
+name: Database backup
+
+on:
+  schedule:
+    # 06:00 UTC daily.
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # The production database is Postgres 17 -- pg_dump should be the same major version (or
+      # newer) as the server, and ubuntu-latest's default apt repo doesn't carry 17 yet, so pull
+      # it from the official PGDG apt repo instead.
+      - name: Install postgresql-client-17 (PGDG apt repo)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends curl ca-certificates gnupg lsb-release
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor -o /usr/share/keyrings/postgresql.gpg
+          echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client-17
+
+      - name: Dump the app schema
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_DB_URL:-}" ]; then
+            echo "The SUPABASE_DB_URL repository secret is not set -- see README.md." >&2
+            exit 1
+          fi
+          mkdir -p backup
+          /usr/lib/postgresql/17/bin/pg_dump "$SUPABASE_DB_URL" \
+            --schema=app --no-owner --no-privileges -Fc \
+            -f "backup/kcalma-app-schema-$(date -u +%Y%m%d).dump"
+          # Never let the connection string reach the log: no -x, no echoing $SUPABASE_DB_URL,
+          # and this listing only ever prints the output FILENAME, never the pg_dump arguments.
+          ls -lh backup/
+
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kcalma-db-backup-${{ github.run_id }}
+          path: backup/*.dump
+          retention-days: 30
+          if-no-files-found: error

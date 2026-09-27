@@ -62,3 +62,32 @@ Most tests are plain unit tests or Spring web slices (`@WebMvcTest`) and need no
 real, disposable Postgres 17 container (via Testcontainers) — it needs Docker running, but is
 annotated `@Testcontainers(disabledWithoutDocker = true)`, so the rest of the suite still passes
 on a machine without Docker; that one test class is simply skipped instead of failing.
+
+## Database backups
+
+`.github/workflows/db-backup.yml` runs a daily `pg_dump` of the production Supabase database
+(schema `app` only) and uploads it as a workflow artifact, retained for 30 days. It also runs
+on-demand from the Actions tab (`workflow_dispatch`).
+
+**Setup (repository owner, one-time):** add a repository secret named `SUPABASE_DB_URL` with the
+Supabase **session pooler** connection string, including the password — Dashboard → Connect →
+ORMs/JDBC → "Session pooler" (port 5432; the same kind of URL `DB_URL` in `.env` uses, just with
+its own dedicated secret rather than reusing that one). The workflow never echoes this value.
+
+**Restoring a backup:**
+
+1. Download the artifact from the workflow run (Actions tab → the run → Artifacts) and unzip it —
+   you'll get a single `.dump` file (custom-format `pg_dump` output).
+2. Restore it into a database with `pg_restore` (install the matching `postgresql-client-17` if
+   you don't have it):
+
+   ```bash
+   pg_restore --dbname="<target-connection-string>" --schema=app --no-owner --no-privileges --clean <file>.dump
+   ```
+
+   - Point `--dbname` at a **throwaway/local** database first if you're not certain about the
+     restore — `--clean` drops the existing `app` schema's objects before recreating them.
+   - `--no-owner --no-privileges` avoids failing on role names that don't exist in the target
+     database (mirrors the flags `pg_dump` was run with).
+3. Verify the row counts you expect are there, then Flyway will happily continue from that state —
+   `flyway_schema_history` is part of schema `app` and is included in the dump.

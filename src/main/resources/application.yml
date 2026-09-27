@@ -57,6 +57,9 @@ app:
 kcalma:
   reminders:
     scheduler-enabled: ${REMINDERS_SCHEDULER_ENABLED:true}
+    # How long past its exact minute a slot stays due -- see DueReminderEvaluator's javadoc. Covers
+    # a restart or a slow tick without losing the occurrence for the rest of the day.
+    catch-up-minutes: ${REMINDERS_CATCH_UP_MINUTES:10}
 
 # Off by default (production on Render stays off) — SecurityConfig gates /v3/api-docs and
 # /swagger-ui/** behind this same env var, so the docs' own registration and their exposure

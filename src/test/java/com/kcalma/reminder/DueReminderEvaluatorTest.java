@@ -25,7 +25,9 @@ class DueReminderEvaluatorTest {
     private static final LocalDate A_MONDAY = LocalDate.of(2026, 9, 28).with(TemporalAdjusters.nextOrSame(DayOfWeek.MONDAY));
     private static final LocalDate THE_SUNDAY_BEFORE_IT = A_MONDAY.minusDays(1);
 
-    private final DueReminderEvaluator evaluator = new DueReminderEvaluator();
+    private static final int CATCH_UP_MINUTES = 10;
+
+    private final DueReminderEvaluator evaluator = new DueReminderEvaluator(CATCH_UP_MINUTES);
 
     private static final DueReminderEvaluator.Signals NOTHING_LOGGED = new DueReminderEvaluator.Signals(Set.of(), 0, 2000, false);
 
@@ -75,12 +77,43 @@ class DueReminderEvaluatorTest {
     }
 
     @Test
-    void evaluate_mealTimeOffByOneMinute_isNotDue() {
+    void evaluate_mealBeforeItsConfiguredTime_isNotDue() {
         ReminderSettingsData settings = onlyMeal("ALMUERZO", "13:00");
 
-        List<DueReminderEvaluator.Due> due = evaluator.evaluate(LocalDateTime.of(A_MONDAY, java.time.LocalTime.of(13, 1)), settings, NOTHING_LOGGED);
+        List<DueReminderEvaluator.Due> due = evaluator.evaluate(LocalDateTime.of(A_MONDAY, java.time.LocalTime.of(12, 59)), settings, NOTHING_LOGGED);
 
         assertThat(due).isEmpty();
+    }
+
+    @Test
+    void evaluate_mealNineMinutesAfterItsConfiguredTime_isStillDueWithinTheCatchUpWindow() {
+        ReminderSettingsData settings = onlyMeal("ALMUERZO", "13:00");
+
+        List<DueReminderEvaluator.Due> due = evaluator.evaluate(LocalDateTime.of(A_MONDAY, java.time.LocalTime.of(13, 9)), settings, NOTHING_LOGGED);
+
+        assertThat(due).hasSize(1);
+        assertThat(due.get(0).reminderKey()).isEqualTo("MEAL_ALMUERZO");
+    }
+
+    @Test
+    void evaluate_mealTenMinutesAfterItsConfiguredTime_isNoLongerDueOnceTheCatchUpWindowCloses() {
+        ReminderSettingsData settings = onlyMeal("ALMUERZO", "13:00");
+
+        List<DueReminderEvaluator.Due> due = evaluator.evaluate(LocalDateTime.of(A_MONDAY, java.time.LocalTime.of(13, 10)), settings, NOTHING_LOGGED);
+
+        assertThat(due).isEmpty(); // catch-up window is [slot, slot + catchUpMinutes) -- 10 minutes is already outside it
+    }
+
+    @Test
+    void evaluate_lateNightSlotsCatchUpWindowNeverCarriesPastMidnightIntoTheNextDay() {
+        // CENA at 23:55 with a 10-minute catch-up window would nominally reach 00:05 -- but that's
+        // the NEXT calendar day, and the window must never cross midnight (see the class javadoc).
+        ReminderSettingsData settings = onlyMeal("CENA", "23:55");
+
+        List<DueReminderEvaluator.Due> dueAfterMidnight = evaluator.evaluate(
+                LocalDateTime.of(A_MONDAY.plusDays(1), java.time.LocalTime.of(0, 2)), settings, NOTHING_LOGGED);
+
+        assertThat(dueAfterMidnight).isEmpty();
     }
 
     @Test
@@ -130,6 +163,29 @@ class DueReminderEvaluatorTest {
         DueReminderEvaluator.Signals behindPace = new DueReminderEvaluator.Signals(Set.of(), 0, 2000, false);
 
         List<DueReminderEvaluator.Due> due = evaluator.evaluate(LocalDateTime.of(A_MONDAY, java.time.LocalTime.of(11, 0)), settings, behindPace);
+
+        assertThat(due).isEmpty();
+    }
+
+    @Test
+    void evaluate_waterNineMinutesAfterASlot_isStillDueAndKeyedToTheSlotNotToNow() {
+        ReminderSettingsData settings = onlyWater(2, "10:00", "20:00"); // slots: 10,12,14,... -- by 14:00 expect 800ml
+        DueReminderEvaluator.Signals behindPace = new DueReminderEvaluator.Signals(Set.of(), 100, 2000, false);
+
+        List<DueReminderEvaluator.Due> due = evaluator.evaluate(LocalDateTime.of(A_MONDAY, java.time.LocalTime.of(14, 9)), settings, behindPace);
+
+        assertThat(due).hasSize(1);
+        // Same key as if it had fired exactly at 14:00 -- every tick inside one catch-up window
+        // dedupes to the same app.reminder_log occurrence instead of claiming a fresh one per minute.
+        assertThat(due.get(0).reminderKey()).isEqualTo("WATER_14:00");
+    }
+
+    @Test
+    void evaluate_waterTenMinutesAfterASlot_isNoLongerDueOnceTheCatchUpWindowCloses() {
+        ReminderSettingsData settings = onlyWater(2, "10:00", "20:00");
+        DueReminderEvaluator.Signals behindPace = new DueReminderEvaluator.Signals(Set.of(), 100, 2000, false);
+
+        List<DueReminderEvaluator.Due> due = evaluator.evaluate(LocalDateTime.of(A_MONDAY, java.time.LocalTime.of(14, 10)), settings, behindPace);
 
         assertThat(due).isEmpty();
     }

@@ -9,6 +9,7 @@ import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
@@ -18,6 +19,19 @@ import org.springframework.stereotype.Component;
  * is the only caller: it gathers {@link Signals} from the real repositories, calls {@link
  * #evaluate}, then separately claims the {@code app.reminder_log} dedupe slot for each {@link Due}
  * before actually sending — this class knows nothing about dedupe or persistence.
+ *
+ * <p>Every slot (a meal's/weigh-in's {@code HH:mm}, or one of water's every-{@code N}-hours slots)
+ * is due not just at the exact minute it's configured for, but for {@code catchUpMinutes} after it
+ * too — {@code slot <= now < slot + catchUpMinutes} — so a restart or a slow tick near a due minute
+ * doesn't lose that occurrence for the rest of the day. The window never crosses midnight: {@link
+ * Duration#between(java.time.temporal.Temporal, java.time.temporal.Temporal)} on two bare {@link
+ * LocalTime}s (no date attached) is a plain subtraction of nanosecond-of-day, never a modulo-24h
+ * wraparound, so a slot late at night (e.g. {@code 23:55}) yields a negative, out-of-window elapsed
+ * time as soon as {@code now} rolls over into the next calendar day. Water's dedupe key is built
+ * from the SLOT's time, not {@code now}'s — e.g. still {@code WATER_14:00} whether this fires
+ * exactly at 14:00 or is caught up nine minutes later — so every tick inside one catch-up window
+ * dedupes to the same {@code app.reminder_log} occurrence instead of claiming a fresh one each
+ * minute.
  */
 @Component
 public class DueReminderEvaluator {
@@ -28,6 +42,12 @@ public class DueReminderEvaluator {
 
     /** One reminder that should be sent right now. {@code reminderKey} is the {@code app.reminder_log} dedupe key. */
     public record Due(String reminderKey, String title, String body, String url) {
+    }
+
+    private final int catchUpMinutes;
+
+    public DueReminderEvaluator(@Value("${kcalma.reminders.catch-up-minutes:10}") int catchUpMinutes) {
+        this.catchUpMinutes = catchUpMinutes;
     }
 
     public List<Due> evaluate(LocalDateTime now, ReminderSettingsData settings, Signals signals) {
@@ -46,7 +66,7 @@ public class DueReminderEvaluator {
     private void checkMeals(List<Due> due, LocalTime nowTime, ReminderSettingsData settings, Signals signals) {
         for (String mealKey : ReminderSettingsData.REMINDABLE_MEALS) {
             ReminderSettingsData.MealSetting mealSetting = settings.meals().get(mealKey);
-            if (mealSetting == null || !mealSetting.enabled() || !matchesMinute(mealSetting.time(), nowTime)) {
+            if (mealSetting == null || !mealSetting.enabled() || !isWithinCatchUpWindow(mealSetting.time(), nowTime)) {
                 continue;
             }
             if (signals.mealsLoggedToday().contains(MealType.valueOf(mealKey))) {
@@ -62,27 +82,38 @@ public class DueReminderEvaluator {
         }
         LocalTime from = parseTimeOrNull(water.from());
         LocalTime to = parseTimeOrNull(water.to());
-        if (from == null || to == null || nowTime.isBefore(from) || nowTime.isAfter(to) || water.everyHours() <= 0) {
+        if (from == null || to == null || water.everyHours() <= 0 || nowTime.isBefore(from)) {
             return;
         }
+
+        long slotSizeMinutes = water.everyHours() * 60L;
         long elapsedMinutes = Duration.between(from, nowTime).toMinutes();
-        if (elapsedMinutes % (water.everyHours() * 60L) != 0) {
-            return; // not one of the configured slots (e.g. every 2h from 10:00 -> 10:00,12:00,...)
+        long sinceLastSlot = elapsedMinutes % slotSizeMinutes;
+        if (sinceLastSlot >= catchUpMinutes) {
+            return; // now isn't within catch-up range of any configured slot (e.g. every 2h from 10:00 -> 10:00,12:00,...)
+        }
+        // The slot THIS catch-up window belongs to -- e.g. 14:00 whether now is 14:00 or 14:09 -- so
+        // the dedupe key below and the pro-rata target it feeds stay anchored to the slot, not to
+        // whichever minute inside the window actually happened to fire.
+        LocalTime slot = nowTime.minusMinutes(sinceLastSlot);
+        if (slot.isAfter(to)) {
+            return; // this slot is past the configured window
         }
 
         long windowMinutes = Duration.between(from, to).toMinutes();
-        double elapsedFraction = windowMinutes <= 0 ? 1.0 : Math.min(1.0, elapsedMinutes / (double) windowMinutes);
+        long slotElapsedMinutes = elapsedMinutes - sinceLastSlot;
+        double elapsedFraction = windowMinutes <= 0 ? 1.0 : Math.min(1.0, slotElapsedMinutes / (double) windowMinutes);
         int expectedMlByNow = (int) Math.round(signals.waterTargetMl() * elapsedFraction);
         if (signals.waterMlToday() >= expectedMlByNow) {
-            return; // SMART skip: already at or ahead of the pro-rata target for this hour
+            return; // SMART skip: already at or ahead of the pro-rata target for this slot
         }
 
-        due.add(new Due("WATER_" + nowTime, "¡Hidratate!", "Todavía no tomaste suficiente agua hoy.", "/"));
+        due.add(new Due("WATER_" + slot, "¡Hidratate!", "Todavía no tomaste suficiente agua hoy.", "/"));
     }
 
     private void checkWeighIn(
             List<Due> due, LocalDateTime now, LocalTime nowTime, ReminderSettingsData.WeighInSetting weighIn, Signals signals) {
-        if (weighIn == null || !weighIn.enabled() || !matchesMinute(weighIn.time(), nowTime)) {
+        if (weighIn == null || !weighIn.enabled() || !isWithinCatchUpWindow(weighIn.time(), nowTime)) {
             return;
         }
         if (!weighIn.days().contains(weekdayCode(now.getDayOfWeek()))) {
@@ -99,9 +130,14 @@ public class DueReminderEvaluator {
         return dayOfWeek.name().substring(0, 3);
     }
 
-    private boolean matchesMinute(String hhmm, LocalTime nowTime) {
+    /** {@code slot <= nowTime < slot + catchUpMinutes} — see the class javadoc for why this never crosses midnight. */
+    private boolean isWithinCatchUpWindow(String hhmm, LocalTime nowTime) {
         LocalTime configured = parseTimeOrNull(hhmm);
-        return configured != null && configured.equals(nowTime);
+        if (configured == null) {
+            return false;
+        }
+        long elapsedMinutes = Duration.between(configured, nowTime).toMinutes();
+        return elapsedMinutes >= 0 && elapsedMinutes < catchUpMinutes;
     }
 
     /** Never throws: a malformed persisted time (there shouldn't be one — see {@code dto.ReminderSettingsRequest}'s {@code @Pattern}) just never matches. */

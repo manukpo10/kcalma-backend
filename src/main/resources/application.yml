@@ -46,6 +46,17 @@ app:
     window-requests: ${RATE_LIMIT_WINDOW_REQUESTS:20}
     window-minutes: ${RATE_LIMIT_WINDOW_MINUTES:10}
     daily-requests: ${RATE_LIMIT_DAILY_REQUESTS:150}
+  push:
+    public-key: ${VAPID_PUBLIC_KEY:}
+    private-key: ${VAPID_PRIVATE_KEY:}
+    subject: ${VAPID_SUBJECT:https://kcalma-frontend.vercel.app}
+
+# Sprint 3b smart reminders: the scheduler itself can be killed with one env var, independent of
+# the /api/push/**  and /api/reminders endpoints (which always keep working) -- see
+# com.kcalma.reminder.ReminderScheduler's javadoc for the two concrete reasons this exists.
+kcalma:
+  reminders:
+    scheduler-enabled: ${REMINDERS_SCHEDULER_ENABLED:true}
 
 # Off by default (production on Render stays off) — SecurityConfig gates /v3/api-docs and
 # /swagger-ui/** behind this same env var, so the docs' own registration and their exposure

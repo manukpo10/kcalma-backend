@@ -31,6 +31,12 @@ import com.kcalma.profile.Pace;
 import com.kcalma.profile.Sex;
 import com.kcalma.profile.UserProfile;
 import com.kcalma.profile.UserProfileRepository;
+import com.kcalma.push.PushSubscriptionService;
+import com.kcalma.push.VapidKeyService;
+import com.kcalma.reminder.ReminderLogRepository;
+import com.kcalma.reminder.ReminderSettings;
+import com.kcalma.reminder.ReminderSettingsData;
+import com.kcalma.reminder.ReminderSettingsRepository;
 import com.kcalma.water.WaterLog;
 import com.kcalma.water.WaterLogRepository;
 import jakarta.persistence.EntityManager;
@@ -84,7 +90,11 @@ import org.testcontainers.utility.MountableFile;
     "app.security.supabase-url=https://example.supabase.co",
     "app.security.owner-user-ids=11111111-1111-1111-1111-111111111111",
     "app.security.allowed-origins=http://localhost:5173",
-    "app.gemini.api-key=test-key"
+    "app.gemini.api-key=test-key",
+    // This class isn't testing scheduling behavior (see ReminderSchedulerTest for that) and its
+    // container is torn down right after the last @Test method -- without this, a tick that fires
+    // during/after teardown logs a harmless but noisy "connection is closed" error.
+    "kcalma.reminders.scheduler-enabled=false"
 })
 class DatabaseIntegrationTest {
 
@@ -127,11 +137,23 @@ class DatabaseIntegrationTest {
     @Autowired
     private TdeeCheckinRepository checkinRepository;
 
+    @Autowired
+    private VapidKeyService vapidKeyService;
+
+    @Autowired
+    private PushSubscriptionService pushSubscriptionService;
+
+    @Autowired
+    private ReminderSettingsRepository reminderSettingsRepository;
+
+    @Autowired
+    private ReminderLogRepository reminderLogRepository;
+
     @PersistenceContext
     private EntityManager entityManager;
 
     @Test
-    void flyway_migratesEveryVersionUpToV14Successfully() throws SQLException {
+    void flyway_migratesEveryVersionUpToV15Successfully() throws SQLException {
         List<String> versions = new ArrayList<>();
         try (Connection connection = dataSource.getConnection();
                 Statement statement = connection.createStatement();
@@ -142,7 +164,7 @@ class DatabaseIntegrationTest {
                 versions.add(resultSet.getString("version"));
             }
         }
-        assertThat(versions).contains("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14");
+        assertThat(versions).contains("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15");
     }
 
     @Test
@@ -569,5 +591,106 @@ class DatabaseIntegrationTest {
         })
                 .isInstanceOf(SQLException.class)
                 .hasMessageContaining("tdee_checkin_status_check");
+    }
+
+    /**
+     * Goes through {@link VapidKeyService} (public) rather than the package-private {@code
+     * PushConfigRepository} directly -- proves the same thing (the entity maps cleanly onto
+     * app.push_config and the CHECK (id = 1) singleton insert succeeds against real Postgres)
+     * without reaching past the feature's own encapsulation boundary from a different package.
+     */
+    @Test
+    void pushConfig_isGeneratedOnceAndPersistedAcrossRepeatedResolutionThroughTheRealDatabase() throws SQLException {
+        String firstResolution = vapidKeyService.getPublicKeyBase64Url();
+        String secondResolution = vapidKeyService.getPublicKeyBase64Url();
+
+        assertThat(firstResolution).isEqualTo(secondResolution);
+        assertThat(java.util.Base64.getUrlDecoder().decode(firstResolution)).hasSize(65); // 0x04 || X(32) || Y(32)
+
+        try (Connection connection = dataSource.getConnection();
+                Statement statement = connection.createStatement();
+                ResultSet resultSet = statement.executeQuery("SELECT count(*) FROM app.push_config")) {
+            assertThat(resultSet.next()).isTrue();
+            assertThat(resultSet.getInt(1)).isEqualTo(1); // exactly the one singleton row, never a second
+        }
+    }
+
+    /** Same reasoning as {@link #pushConfig_isGeneratedOnceAndPersistedAcrossRepeatedResolutionThroughTheRealDatabase}: through the public {@link PushSubscriptionService}, not the package-private repository. */
+    @Test
+    void pushSubscription_upsertByEndpoint_roundTripsAndReplacesRatherThanDuplicatingThroughTheRealDatabase() throws SQLException {
+        UUID userId = UUID.randomUUID();
+        String endpoint = "https://push.example/" + UUID.randomUUID();
+
+        pushSubscriptionService.subscribe(userId, endpoint, "p256dh-v1", "auth-v1", "UA-v1");
+        assertRowCountForEndpoint(endpoint, 1);
+        assertP256dhForEndpoint(endpoint, "p256dh-v1");
+
+        pushSubscriptionService.subscribe(userId, endpoint, "p256dh-v2", "auth-v2", "UA-v2"); // re-subscribe, same endpoint
+        assertRowCountForEndpoint(endpoint, 1); // still one row -- upserted, not duplicated
+        assertP256dhForEndpoint(endpoint, "p256dh-v2");
+
+        pushSubscriptionService.unsubscribe(userId, endpoint);
+        assertRowCountForEndpoint(endpoint, 0);
+    }
+
+    private void assertRowCountForEndpoint(String endpoint, int expected) throws SQLException {
+        try (Connection connection = dataSource.getConnection();
+                java.sql.PreparedStatement statement =
+                        connection.prepareStatement("SELECT count(*) FROM app.push_subscription WHERE endpoint = ?")) {
+            statement.setString(1, endpoint);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                assertThat(resultSet.next()).isTrue();
+                assertThat(resultSet.getInt(1)).isEqualTo(expected);
+            }
+        }
+    }
+
+    private void assertP256dhForEndpoint(String endpoint, String expectedP256dh) throws SQLException {
+        try (Connection connection = dataSource.getConnection();
+                java.sql.PreparedStatement statement =
+                        connection.prepareStatement("SELECT p256dh FROM app.push_subscription WHERE endpoint = ?")) {
+            statement.setString(1, endpoint);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                assertThat(resultSet.next()).isTrue();
+                assertThat(resultSet.getString("p256dh")).isEqualTo(expectedP256dh);
+            }
+        }
+    }
+
+    /**
+     * The one design decision this test exists specifically to de-risk: {@code
+     * ReminderSettingsData.meals} is a {@code Map<String, MealSetting>} rather than an enum-keyed
+     * map (see that class's javadoc) precisely so this jsonb round trip has no enum-key ambiguity
+     * to get subtly wrong. Proves it does not.
+     */
+    @Test
+    void reminderSettings_roundTripsTheStringKeyedJsonbMealsMapThroughTheRealDatabase() {
+        UUID userId = UUID.randomUUID();
+        ReminderSettingsData data = ReminderSettingsData.defaults();
+        reminderSettingsRepository.saveAndFlush(new ReminderSettings(userId, data));
+        entityManager.clear(); // force the next read to actually hit the DB, not the session cache
+
+        ReminderSettings reloaded = reminderSettingsRepository.findById(userId).orElseThrow();
+        assertThat(reloaded.getSettings()).isEqualTo(data);
+        assertThat(reloaded.getSettings().meals().get("ALMUERZO").time()).isEqualTo("13:00");
+        assertThat(reloaded.getSettings().water().everyHours()).isEqualTo(2);
+        assertThat(reloaded.getSettings().weighIn().days()).containsExactly("MON", "THU");
+    }
+
+    /**
+     * {@link ReminderLogRepository#claim} is the whole dedupe mechanism {@code ReminderScheduler}
+     * relies on to never double-send — this proves the {@code ON CONFLICT DO NOTHING} it compiles
+     * to actually behaves atomically against real Postgres, not just that the Java compiles.
+     */
+    @Test
+    void reminderLog_claimDedupesTheSameOccurrenceButAllowsDifferentKeysOrDays() {
+        UUID userId = UUID.randomUUID();
+        LocalDate day = LocalDate.of(2026, 9, 28);
+
+        assertThat(reminderLogRepository.claim(userId, "MEAL_ALMUERZO", day)).isEqualTo(1); // first claim wins
+        assertThat(reminderLogRepository.claim(userId, "MEAL_ALMUERZO", day)).isEqualTo(0); // same occurrence again -- loses
+
+        assertThat(reminderLogRepository.claim(userId, "WATER_14:00", day)).isEqualTo(1); // different key, same day -- independent
+        assertThat(reminderLogRepository.claim(userId, "MEAL_ALMUERZO", day.plusDays(1))).isEqualTo(1); // same key, next day -- independent
     }
 }

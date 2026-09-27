@@ -1,0 +1,17 @@
+package com.kcalma.config;
+
+import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableScheduling;
+
+/**
+ * Turns on {@code @Scheduled} processing for the whole app — currently just {@code
+ * com.kcalma.reminder.ReminderScheduler}'s once-a-minute tick. Kept as its own tiny config class
+ * (rather than annotating {@code KcalmaApiApplication}) so a {@code @WebMvcTest} slice never
+ * accidentally starts the scheduler: slice tests don't scan {@code com.kcalma.config}'s individual
+ * {@code @Configuration} classes unless explicitly {@code @Import}ed, same reasoning as {@link
+ * ClockConfig}/{@link OpenApiConfig} already being separate.
+ */
+@Configuration
+@EnableScheduling
+public class SchedulingConfig {
+}

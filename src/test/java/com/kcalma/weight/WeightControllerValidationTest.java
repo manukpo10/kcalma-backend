@@ -5,6 +5,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.kcalma.config.ClockConfig;
@@ -108,14 +109,12 @@ class WeightControllerValidationTest {
         when(jwtDecoder.decode(TOKEN)).thenReturn(jwtFor(OWNER_ID));
         String futureDate = LocalDate.now().plusDays(1).toString();
 
-        MvcResult result = mockMvc.perform(put("/api/weights/" + futureDate)
+        mockMvc.perform(put("/api/weights/" + futureDate)
                         .header("Authorization", "Bearer " + TOKEN)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"weightKg\": 70.0}"))
                 .andExpect(status().isBadRequest())
-                .andReturn();
-
-        assertThat(result.getResponse().getErrorMessage()).isEqualTo("La fecha no puede ser futura.");
+                .andExpect(jsonPath("$.message").value("La fecha no puede ser futura."));
         verifyNoInteractions(weightEntryService);
     }
 
@@ -123,14 +122,48 @@ class WeightControllerValidationTest {
     void list_fromAfterTo_returns400WithSpanishMessage() throws Exception {
         when(jwtDecoder.decode(TOKEN)).thenReturn(jwtFor(OWNER_ID));
 
-        MvcResult result = mockMvc.perform(get("/api/weights")
+        mockMvc.perform(get("/api/weights")
                         .header("Authorization", "Bearer " + TOKEN)
                         .param("from", "2026-09-25")
                         .param("to", "2026-09-01"))
                 .andExpect(status().isBadRequest())
-                .andReturn();
+                .andExpect(jsonPath("$.message").value("La fecha de inicio no puede ser posterior a la de fin."));
+        verifyNoInteractions(weightEntryService);
+    }
 
-        assertThat(result.getResponse().getErrorMessage()).isEqualTo("La fecha de inicio no puede ser posterior a la de fin.");
+    @Test
+    void list_missingFromParam_returns400WithGenericSpanishMessage() throws Exception {
+        when(jwtDecoder.decode(TOKEN)).thenReturn(jwtFor(OWNER_ID));
+
+        mockMvc.perform(get("/api/weights").header("Authorization", "Bearer " + TOKEN).param("to", "2026-09-25"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Falta un parámetro obligatorio en la solicitud."));
+        verifyNoInteractions(weightEntryService);
+    }
+
+    @Test
+    void upsert_pathVariableIsNotAValidDate_returns400WithGenericSpanishMessage() throws Exception {
+        when(jwtDecoder.decode(TOKEN)).thenReturn(jwtFor(OWNER_ID));
+
+        mockMvc.perform(put("/api/weights/not-a-date")
+                        .header("Authorization", "Bearer " + TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"weightKg\": 70.0}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Uno de los parámetros de la solicitud no tiene un formato válido."));
+        verifyNoInteractions(weightEntryService);
+    }
+
+    @Test
+    void upsert_malformedJsonBody_returns400WithGenericSpanishMessage() throws Exception {
+        when(jwtDecoder.decode(TOKEN)).thenReturn(jwtFor(OWNER_ID));
+
+        mockMvc.perform(put("/api/weights/" + TODAY)
+                        .header("Authorization", "Bearer " + TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{not valid json"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("El cuerpo de la solicitud no es válido."));
         verifyNoInteractions(weightEntryService);
     }
 

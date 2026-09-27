@@ -1,8 +1,10 @@
 package com.kcalma.suggestions;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -15,6 +17,7 @@ import com.kcalma.food.dto.AnalyzedDishResponse;
 import com.kcalma.food.reference.ResolvedDish;
 import com.kcalma.food.reference.ResolvedFoodItem;
 import com.kcalma.ratelimit.GeminiRateLimiter;
+import com.kcalma.ratelimit.RateLimitExceededException;
 import com.kcalma.security.SecurityConfig;
 import com.kcalma.suggestions.dto.SuggestionOptionResponse;
 import com.kcalma.suggestions.dto.SuggestionResponse;
@@ -171,6 +174,17 @@ class SuggestionControllerTest {
                 .andExpect(jsonPath("$.options[0].dishes[0].ingredients[0].name").value("milanesa de carne"))
                 .andExpect(jsonPath("$.options[0].totals.kcal").value(resolvedDish.totals().kcal()))
                 .andExpect(jsonPath("$.note").doesNotExist());
+    }
+
+    @Test
+    void rateLimitExceeded_returns429WithRetryAfterHeaderAndSpanishMessage() throws Exception {
+        when(jwtDecoder.decode(TOKEN)).thenReturn(jwtFor(OWNER_ID));
+        doThrow(new RateLimitExceededException(90)).when(geminiRateLimiter).checkAndRecord(OWNER_ID);
+
+        mockMvc.perform(authenticatedPost("{\"date\": \"2026-09-25\", \"mealType\": \"CENA\"}"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string("Retry-After", "90"))
+                .andExpect(jsonPath("$.message").value("Llegaste al límite de análisis por ahora. Probá de nuevo en unos minutos."));
     }
 
     @Test

@@ -3,9 +3,11 @@ package com.kcalma.food;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -18,6 +20,7 @@ import com.kcalma.food.reference.FoodReferenceMatcher;
 import com.kcalma.food.reference.ResolvedDish;
 import com.kcalma.food.reference.ResolvedFoodItem;
 import com.kcalma.ratelimit.GeminiRateLimiter;
+import com.kcalma.ratelimit.RateLimitExceededException;
 import com.kcalma.security.SecurityConfig;
 import java.time.Instant;
 import java.util.List;
@@ -154,6 +157,19 @@ class FoodControllerTextAnalysisTest {
         mockMvc.perform(authenticatedPost("{\"description\": \"un plato de fideos con tuco\"}"))
                 .andExpect(status().isBadGateway())
                 .andExpect(jsonPath("$.message").value("El servicio de análisis no está disponible en este momento."));
+    }
+
+    @Test
+    void rateLimitExceeded_returns429WithRetryAfterHeaderAndSpanishMessageAndNeverCallsAnalyzer() throws Exception {
+        when(jwtDecoder.decode(TOKEN)).thenReturn(jwtFor(OWNER_ID));
+        doThrow(new RateLimitExceededException(37)).when(geminiRateLimiter).checkAndRecord(OWNER_ID);
+
+        mockMvc.perform(authenticatedPost("{\"description\": \"un mate cocido\"}"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string("Retry-After", "37"))
+                .andExpect(jsonPath("$.message").value("Llegaste al límite de análisis por ahora. Probá de nuevo en unos minutos."));
+
+        verifyNoInteractions(foodAnalyzer);
     }
 
     @Test

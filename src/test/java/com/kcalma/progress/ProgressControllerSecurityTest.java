@@ -1,8 +1,8 @@
 package com.kcalma.progress;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.kcalma.progress.dto.ProgressResponse;
@@ -85,12 +85,9 @@ class ProgressControllerSecurityTest {
     void owner_unknownRange_returns400WithSpanishMessage() throws Exception {
         when(jwtDecoder.decode(TOKEN)).thenReturn(jwtFor(OWNER_ID));
 
-        org.springframework.test.web.servlet.MvcResult result = mockMvc
-                .perform(get("/api/progress").header("Authorization", "Bearer " + TOKEN).param("range", "6M"))
+        mockMvc.perform(get("/api/progress").header("Authorization", "Bearer " + TOKEN).param("range", "6M"))
                 .andExpect(status().isBadRequest())
-                .andReturn();
-
-        assertThat(result.getResponse().getErrorMessage()).isEqualTo("El rango no es válido. Usá 1M, 3M, 1Y o ALL.");
+                .andExpect(jsonPath("$.message").value("El rango no es válido. Usá 1M, 3M, 1Y o ALL."));
     }
 
     private static Jwt jwtFor(String subject) {

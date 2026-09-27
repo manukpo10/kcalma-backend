@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.kcalma.day.dto.DayResponse;
 import com.kcalma.food.MealType;
 import com.kcalma.food.NutritionMath;
+import com.kcalma.profile.ProteinBasis;
 import com.kcalma.profile.dto.NutritionTargetsResponse;
 import com.kcalma.security.SecurityConfig;
 import java.time.Instant;
@@ -86,7 +87,8 @@ class DayControllerSecurityTest {
     }
 
     private static DayResponse sampleDay() {
-        NutritionTargetsResponse targets = new NutritionTargetsResponse(2000, false, 120, 65, 220, 28, 50, 2000, 2500);
+        NutritionTargetsResponse targets = new NutritionTargetsResponse(
+                2000, false, 120, 65, 220, 28, 50, 2000, 2500, 0.0, 0.0, ProteinBasis.BODY_WEIGHT, 80.0, null, List.of());
         NutritionMath.Totals zero = NutritionMath.Totals.ZERO;
         Map<MealType, List<com.kcalma.food.dto.FoodEntryResponse>> meals = new EnumMap<>(MealType.class);
         for (MealType mealType : MealType.values()) {

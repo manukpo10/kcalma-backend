@@ -12,6 +12,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -91,9 +92,10 @@ class ProfileControllerSecurityTest {
         OffsetDateTime now = OffsetDateTime.now();
         ProfileResponse profile = new ProfileResponse(
                 id, Sex.FEMALE, LocalDate.of(1990, 1, 1), 165, new BigDecimal("60.00"),
-                ActivityLevel.SEDENTARY, Goal.MAINTAIN, new BigDecimal("55.00"), now, now);
+                ActivityLevel.SEDENTARY, Goal.MAINTAIN, new BigDecimal("55.00"), null, DietStyle.BALANCED, List.of(), false, null, null,
+                now, now);
         NutritionTargetsResponse targets =
-                new NutritionTargetsResponse(1800, false, 96, 60, 180, 25, 45, 2000, 2100);
+                new NutritionTargetsResponse(1800, false, 96, 60, 180, 25, 45, 2000, 2100, 0.0, 0.0, ProteinBasis.BODY_WEIGHT, 60.0, null, List.of());
         return new ProfileWithTargetsResponse(profile, targets);
     }
 }

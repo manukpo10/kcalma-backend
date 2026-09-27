@@ -14,10 +14,20 @@ import com.kcalma.food.reference.FoodReferenceRepository;
 import com.kcalma.food.reference.UserFood;
 import com.kcalma.food.reference.UserFoodRepository;
 import com.kcalma.food.reference.UserFoodSource;
+import com.kcalma.profile.ActivityLevel;
+import com.kcalma.profile.DietStyle;
+import com.kcalma.profile.DietaryRestriction;
+import com.kcalma.profile.Goal;
+import com.kcalma.profile.Pace;
+import com.kcalma.profile.Sex;
+import com.kcalma.profile.UserProfile;
+import com.kcalma.profile.UserProfileRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import java.math.BigDecimal;
+import java.sql.Array;
 import java.sql.Connection;
+import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -27,6 +37,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import javax.sql.DataSource;
+import org.flywaydb.core.Flyway;
+import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -41,7 +53,7 @@ import org.testcontainers.utility.MountableFile;
 
 /**
  * Real-database integration test: boots the full Spring context (Flyway included) against a
- * clean, disposable Postgres 17 container — running every migration V1..V9 from scratch — then
+ * clean, disposable Postgres 17 container — running every migration V1..V10 from scratch — then
  * round-trips JPA against the tables those migrations create.
  *
  * <p>{@code src/test/resources/testcontainers/init.sql} mimics the parts of a fresh Supabase
@@ -88,11 +100,14 @@ class DatabaseIntegrationTest {
     @Autowired
     private FoodReferenceRepository foodReferenceRepository;
 
+    @Autowired
+    private UserProfileRepository userProfileRepository;
+
     @PersistenceContext
     private EntityManager entityManager;
 
     @Test
-    void flyway_migratesEveryVersionUpToV9Successfully() throws SQLException {
+    void flyway_migratesEveryVersionUpToV10Successfully() throws SQLException {
         List<String> versions = new ArrayList<>();
         try (Connection connection = dataSource.getConnection();
                 Statement statement = connection.createStatement();
@@ -103,7 +118,114 @@ class DatabaseIntegrationTest {
                 versions.add(resultSet.getString("version"));
             }
         }
-        assertThat(versions).contains("1", "2", "3", "4", "5", "6", "7", "8", "9");
+        assertThat(versions).contains("1", "2", "3", "4", "5", "6", "7", "8", "9", "10");
+    }
+
+    @Test
+    void userProfile_roundTripsSprint2aFieldsThroughTheRealDatabase() {
+        UserProfile profile = new UserProfile(UUID.randomUUID());
+        profile.setSex(Sex.FEMALE);
+        profile.setBirthDate(LocalDate.of(1990, 5, 20));
+        profile.setHeightCm(168);
+        profile.setWeightKg(new BigDecimal("70.00"));
+        profile.setActivityLevel(ActivityLevel.LIGHTLY_ACTIVE);
+        profile.setGoal(Goal.LOSE_FAT);
+        profile.setPace(Pace.MODERATE);
+        profile.setDietStyle(DietStyle.HIGH_PROTEIN);
+        profile.setDietaryRestrictions(List.of(DietaryRestriction.VEGETARIAN, DietaryRestriction.GLUTEN_FREE));
+        profile.setStrengthTraining(true);
+        profile.setBodyFatPct(new BigDecimal("28.5"));
+        profile.setBodyFatMeasuredOn(LocalDate.of(2026, 9, 1));
+
+        UserProfile saved = userProfileRepository.saveAndFlush(profile);
+        entityManager.clear(); // force the next read to actually hit the DB, not the session cache
+
+        UserProfile reloaded = userProfileRepository.findById(saved.getUserId()).orElseThrow();
+        assertThat(reloaded.getGoal()).isEqualTo(Goal.LOSE_FAT);
+        assertThat(reloaded.getPace()).isEqualTo(Pace.MODERATE);
+        assertThat(reloaded.getDietStyle()).isEqualTo(DietStyle.HIGH_PROTEIN);
+        assertThat(reloaded.getDietaryRestrictions()).containsExactly(DietaryRestriction.VEGETARIAN, DietaryRestriction.GLUTEN_FREE);
+        assertThat(reloaded.isStrengthTraining()).isTrue();
+        assertThat(reloaded.getBodyFatPct()).isEqualByComparingTo("28.5");
+        assertThat(reloaded.getBodyFatMeasuredOn()).isEqualTo(LocalDate.of(2026, 9, 1));
+    }
+
+    @Test
+    void userProfile_newRowDefaultsDietStyleAndDietaryRestrictionsAndStrengthTrainingWhenUnset() {
+        UserProfile profile = new UserProfile(UUID.randomUUID());
+        profile.setSex(Sex.MALE);
+        profile.setBirthDate(LocalDate.of(1985, 3, 10));
+        profile.setHeightCm(180);
+        profile.setWeightKg(new BigDecimal("82.00"));
+        profile.setActivityLevel(ActivityLevel.SEDENTARY);
+        profile.setGoal(Goal.MAINTAIN);
+        // pace/dietStyle/dietaryRestrictions/strengthTraining/bodyFat* deliberately left untouched.
+
+        UserProfile saved = userProfileRepository.saveAndFlush(profile);
+        entityManager.clear();
+
+        UserProfile reloaded = userProfileRepository.findById(saved.getUserId()).orElseThrow();
+        assertThat(reloaded.getPace()).isNull();
+        assertThat(reloaded.getDietStyle()).isEqualTo(DietStyle.BALANCED);
+        assertThat(reloaded.getDietaryRestrictions()).isEmpty();
+        assertThat(reloaded.isStrengthTraining()).isFalse();
+        assertThat(reloaded.getBodyFatPct()).isNull();
+        assertThat(reloaded.getBodyFatMeasuredOn()).isNull();
+    }
+
+    /**
+     * V10 (Flyway target) turns a legacy pre-V10 row (goal {@code 'LOSE'}, none of the new columns)
+     * into a valid post-V10 one, with no manual backfill. Uses its own throwaway container/database
+     * so the row can genuinely be inserted BEFORE V10 runs — the shared {@link #POSTGRES} container
+     * above is migrated to the latest version by Spring's own Flyway run before any {@code @Test}
+     * method here executes, so it can never be caught mid-migration.
+     */
+    @Test
+    void v10Migration_migratesALegacyLoseGoalRowAndBackfillsTheNewColumnsWithSafeDefaults() throws SQLException {
+        try (PostgreSQLContainer<?> legacyPostgres = new PostgreSQLContainer<>(DockerImageName.parse("postgres:17"))
+                .withCopyFileToContainer(
+                        MountableFile.forClasspathResource("testcontainers/init.sql"), "/docker-entrypoint-initdb.d/01-init.sql")) {
+            legacyPostgres.start();
+            String url = legacyPostgres.getJdbcUrl();
+            String user = legacyPostgres.getUsername();
+            String password = legacyPostgres.getPassword();
+
+            Flyway.configure()
+                    .dataSource(url, user, password)
+                    .schemas("app")
+                    .target(MigrationVersion.fromVersion("9"))
+                    .load()
+                    .migrate();
+
+            UUID legacyUserId = UUID.randomUUID();
+            try (Connection connection = DriverManager.getConnection(url, user, password);
+                    Statement statement = connection.createStatement()) {
+                statement.executeUpdate(
+                        """
+                        INSERT INTO app.user_profile (user_id, sex, birth_date, height_cm, weight_kg, activity_level, goal)
+                        VALUES ('%s', 'FEMALE', '1990-01-01', 165, 70.00, 'SEDENTARY', 'LOSE')
+                        """
+                                .formatted(legacyUserId));
+            }
+
+            Flyway.configure().dataSource(url, user, password).schemas("app").load().migrate();
+
+            try (Connection connection = DriverManager.getConnection(url, user, password);
+                    Statement statement = connection.createStatement();
+                    ResultSet resultSet = statement.executeQuery(
+                            "SELECT goal, pace, diet_style, dietary_restrictions, strength_training, body_fat_pct "
+                                    + "FROM app.user_profile WHERE user_id = '"
+                                    + legacyUserId + "'")) {
+                assertThat(resultSet.next()).isTrue();
+                assertThat(resultSet.getString("goal")).isEqualTo("LOSE_WEIGHT");
+                assertThat(resultSet.getString("pace")).isEqualTo("MODERATE");
+                assertThat(resultSet.getString("diet_style")).isEqualTo("BALANCED");
+                Array restrictions = resultSet.getArray("dietary_restrictions");
+                assertThat((Object[]) restrictions.getArray()).isEmpty();
+                assertThat(resultSet.getBoolean("strength_training")).isFalse();
+                assertThat(resultSet.getObject("body_fat_pct")).isNull();
+            }
+        }
     }
 
     @Test

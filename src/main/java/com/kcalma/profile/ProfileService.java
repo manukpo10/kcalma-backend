@@ -7,6 +7,7 @@ import com.kcalma.profile.dto.ProfileWithTargetsResponse;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.Period;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -39,6 +40,14 @@ public class ProfileService {
         profile.setActivityLevel(request.activityLevel());
         profile.setGoal(request.goal());
         profile.setGoalWeightKg(request.goalWeightKg());
+        // "must be null/ignored for RECOMP and MAINTAIN" (see ProfileController#validatePace for the
+        // opposite, required case) -- silently drop whatever the client sent rather than rejecting it.
+        profile.setPace(request.goal().requiresPace() ? request.pace() : null);
+        profile.setDietStyle(request.dietStyle() != null ? request.dietStyle() : DietStyle.BALANCED);
+        profile.setDietaryRestrictions(request.dietaryRestrictions() != null ? request.dietaryRestrictions() : List.of());
+        profile.setStrengthTraining(request.strengthTraining() != null && request.strengthTraining());
+        profile.setBodyFatPct(request.bodyFatPct());
+        profile.setBodyFatMeasuredOn(request.bodyFatMeasuredOn());
         UserProfile saved = repository.save(profile);
         return toResponse(saved);
     }
@@ -51,7 +60,11 @@ public class ProfileService {
                 profile.getHeightCm(),
                 profile.getWeightKg().doubleValue(),
                 profile.getActivityLevel(),
-                profile.getGoal());
+                profile.getGoal(),
+                profile.getPace(),
+                profile.getDietStyle(),
+                profile.isStrengthTraining(),
+                profile.getBodyFatPct() != null ? profile.getBodyFatPct().doubleValue() : null);
         NutritionCalculator.NutritionTargets targets = calculator.calculate(input);
         return new ProfileWithTargetsResponse(ProfileResponse.from(profile), NutritionTargetsResponse.from(targets));
     }

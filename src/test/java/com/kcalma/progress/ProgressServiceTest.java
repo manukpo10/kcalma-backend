@@ -10,8 +10,10 @@ import com.kcalma.food.FoodEntryRepository;
 import com.kcalma.food.FoodSource;
 import com.kcalma.food.MealType;
 import com.kcalma.profile.ActivityLevel;
+import com.kcalma.profile.DietStyle;
 import com.kcalma.profile.Goal;
 import com.kcalma.profile.ProfileService;
+import com.kcalma.profile.ProteinBasis;
 import com.kcalma.profile.Sex;
 import com.kcalma.profile.dto.NutritionTargetsResponse;
 import com.kcalma.profile.dto.ProfileResponse;
@@ -219,8 +221,9 @@ class ProgressServiceTest {
         OffsetDateTime now = OffsetDateTime.now();
         ProfileResponse profile = new ProfileResponse(
                 id, Sex.FEMALE, LocalDate.of(1990, 1, 1), 165, new BigDecimal("72.00"), ActivityLevel.SEDENTARY,
-                Goal.LOSE, goalWeightKg, now, now);
-        NutritionTargetsResponse targets = new NutritionTargetsResponse(2000, false, 120, 60, 200, 28, 50, 2000, 2500);
+                Goal.LOSE_WEIGHT, goalWeightKg, null, DietStyle.BALANCED, List.of(), false, null, null, now, now);
+        NutritionTargetsResponse targets =
+                new NutritionTargetsResponse(2000, false, 120, 60, 200, 28, 50, 2000, 2500, 0.0, 0.0, ProteinBasis.BODY_WEIGHT, 72.0, null, List.of());
         return new ProfileWithTargetsResponse(profile, targets);
     }
 }

@@ -1,12 +1,16 @@
 package com.kcalma.profile.dto;
 
 import com.kcalma.profile.ActivityLevel;
+import com.kcalma.profile.DietStyle;
+import com.kcalma.profile.DietaryRestriction;
 import com.kcalma.profile.Goal;
+import com.kcalma.profile.Pace;
 import com.kcalma.profile.Sex;
 import com.kcalma.profile.UserProfile;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 public record ProfileResponse(
@@ -18,6 +22,12 @@ public record ProfileResponse(
         ActivityLevel activityLevel,
         Goal goal,
         BigDecimal goalWeightKg,
+        Pace pace,
+        DietStyle dietStyle,
+        List<DietaryRestriction> dietaryRestrictions,
+        boolean strengthTraining,
+        BigDecimal bodyFatPct,
+        LocalDate bodyFatMeasuredOn,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt) {
 
@@ -31,6 +41,12 @@ public record ProfileResponse(
                 profile.getActivityLevel(),
                 profile.getGoal(),
                 profile.getGoalWeightKg(),
+                profile.getPace(),
+                profile.getDietStyle(),
+                profile.getDietaryRestrictions(),
+                profile.isStrengthTraining(),
+                profile.getBodyFatPct(),
+                profile.getBodyFatMeasuredOn(),
                 profile.getCreatedAt(),
                 profile.getUpdatedAt());
     }

@@ -1,5 +1,7 @@
 package com.kcalma.profile;
 
+import com.kcalma.checkin.AdaptiveTdeeService;
+import com.kcalma.checkin.AdaptiveTdeeService.ActiveAdaptiveTdee;
 import com.kcalma.profile.dto.NutritionTargetsResponse;
 import com.kcalma.profile.dto.ProfileRequest;
 import com.kcalma.profile.dto.ProfileResponse;
@@ -17,11 +19,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class ProfileService {
 
     private final UserProfileRepository repository;
+    private final AdaptiveTdeeService adaptiveTdeeService;
     private final Clock clock;
     private final NutritionCalculator calculator = new NutritionCalculator();
 
-    public ProfileService(UserProfileRepository repository, Clock clock) {
+    public ProfileService(UserProfileRepository repository, AdaptiveTdeeService adaptiveTdeeService, Clock clock) {
         this.repository = repository;
+        this.adaptiveTdeeService = adaptiveTdeeService;
         this.clock = clock;
     }
 
@@ -65,7 +69,17 @@ public class ProfileService {
                 profile.getDietStyle(),
                 profile.isStrengthTraining(),
                 profile.getBodyFatPct() != null ? profile.getBodyFatPct().doubleValue() : null);
-        NutritionCalculator.NutritionTargets targets = calculator.calculate(input);
-        return new ProfileWithTargetsResponse(ProfileResponse.from(profile), NutritionTargetsResponse.from(targets));
+
+        // Sprint 3a: an accepted adaptive TDEE (still matching the CURRENT activity level -- see
+        // AdaptiveTdeeService) takes over from the formula as calculate()'s base TDEE; changing
+        // activity level silently falls back to FORMULA until the next accepted check-in.
+        Optional<ActiveAdaptiveTdee> active = adaptiveTdeeService.findActive(profile.getUserId(), profile.getActivityLevel());
+        NutritionCalculator.NutritionTargets targets =
+                active.map(a -> calculator.calculate(input, a.tdeeKcal())).orElseGet(() -> calculator.calculate(input));
+        EnergySource energySource = active.isPresent() ? EnergySource.ADAPTIVE : EnergySource.FORMULA;
+        LocalDate adaptiveSince = active.map(ActiveAdaptiveTdee::since).orElse(null);
+
+        return new ProfileWithTargetsResponse(
+                ProfileResponse.from(profile), NutritionTargetsResponse.from(targets, energySource, adaptiveSince));
     }
 }

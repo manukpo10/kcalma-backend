@@ -3,6 +3,7 @@ package com.kcalma.water;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
+import com.kcalma.profile.EnergySource;
 import com.kcalma.profile.ProfileService;
 import com.kcalma.profile.ProteinBasis;
 import com.kcalma.profile.dto.NutritionTargetsResponse;
@@ -102,7 +103,8 @@ class WaterLogServiceTest {
 
     private static ProfileWithTargetsResponse profileWithWaterTarget(int waterMl) {
         NutritionTargetsResponse targets = new NutritionTargetsResponse(
-                2000, false, 120, 65, 220, 28, 50, 2000, waterMl, 0.0, 0.0, ProteinBasis.BODY_WEIGHT, 80.0, null, List.of());
+                2000, false, 120, 65, 220, 28, 50, 2000, waterMl, 0.0, 0.0, ProteinBasis.BODY_WEIGHT, 80.0, null, List.of(),
+                EnergySource.FORMULA, null);
         ProfileResponse profile = new ProfileResponse(
                 UUID.randomUUID(),
                 com.kcalma.profile.Sex.FEMALE,

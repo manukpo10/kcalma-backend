@@ -3,6 +3,7 @@ package com.kcalma.profile;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
+import com.kcalma.checkin.AdaptiveTdeeService;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -29,6 +30,9 @@ class ProfileServiceTest {
     @Mock
     private UserProfileRepository repository;
 
+    @Mock
+    private AdaptiveTdeeService adaptiveTdeeService;
+
     private final UUID userId = UUID.randomUUID();
 
     @Test
@@ -43,10 +47,10 @@ class ProfileServiceTest {
         UserProfile profile = profileWithBirthDate(LocalDate.of(1990, 9, 26));
         when(repository.findById(userId)).thenReturn(Optional.of(profile));
 
-        int caloriesUsingArgentinaClock =
-                new ProfileService(repository, argentinaClock).findByUserId(userId).orElseThrow().targets().calories();
-        int caloriesUsingUtcClock =
-                new ProfileService(repository, utcClock).findByUserId(userId).orElseThrow().targets().calories();
+        int caloriesUsingArgentinaClock = new ProfileService(repository, adaptiveTdeeService, argentinaClock)
+                .findByUserId(userId).orElseThrow().targets().calories();
+        int caloriesUsingUtcClock = new ProfileService(repository, adaptiveTdeeService, utcClock)
+                .findByUserId(userId).orElseThrow().targets().calories();
 
         // NutritionCalculator's BMR term is "- 5 * ageYears" (Mifflin-St Jeor) -- strictly lower
         // for one more year of age, and with this profile neither result hits the calorie floor.

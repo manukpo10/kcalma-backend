@@ -20,6 +20,7 @@ import com.kcalma.food.reference.ResolvedFoodItem;
 import com.kcalma.profile.ActivityLevel;
 import com.kcalma.profile.DietStyle;
 import com.kcalma.profile.DietaryRestriction;
+import com.kcalma.profile.EnergySource;
 import com.kcalma.profile.Goal;
 import com.kcalma.profile.ProfileService;
 import com.kcalma.profile.ProteinBasis;
@@ -189,7 +190,8 @@ class SuggestionServiceTest {
 
     private static DayResponse sampleDay(NutritionMath.Totals remaining) {
         NutritionTargetsResponse targets = new NutritionTargetsResponse(
-                2000, false, 120, 65, 220, 28, 50, 2000, 2500, 0.0, 0.0, ProteinBasis.BODY_WEIGHT, 60.0, null, List.of());
+                2000, false, 120, 65, 220, 28, 50, 2000, 2500, 0.0, 0.0, ProteinBasis.BODY_WEIGHT, 60.0, null, List.of(),
+                EnergySource.FORMULA, null);
         NutritionMath.Totals consumed = NutritionMath.Totals.ZERO;
         Map<MealType, List<com.kcalma.food.dto.FoodEntryResponse>> meals = new EnumMap<>(MealType.class);
         for (MealType mealType : MealType.values()) {
@@ -211,7 +213,8 @@ class SuggestionServiceTest {
                 userId, Sex.FEMALE, LocalDate.of(1990, 1, 1), 165, new BigDecimal("60.00"), ActivityLevel.SEDENTARY,
                 Goal.MAINTAIN, null, null, dietStyle, restrictions, false, null, null, now, now);
         NutritionTargetsResponse targets = new NutritionTargetsResponse(
-                2000, false, 120, 65, 220, 28, 50, 2000, 2500, 0.0, 0.0, ProteinBasis.BODY_WEIGHT, 60.0, null, List.of());
+                2000, false, 120, 65, 220, 28, 50, 2000, 2500, 0.0, 0.0, ProteinBasis.BODY_WEIGHT, 60.0, null, List.of(),
+                EnergySource.FORMULA, null);
         return new ProfileWithTargetsResponse(profile, targets);
     }
 }

@@ -1,9 +1,16 @@
 package com.kcalma.profile.dto;
 
+import com.kcalma.profile.EnergySource;
 import com.kcalma.profile.NutritionCalculator;
 import com.kcalma.profile.ProteinBasis;
+import java.time.LocalDate;
 import java.util.List;
 
+/**
+ * {@code energySource}/{@code adaptiveSince} (sprint 3a, additive) say whether {@link #calories}
+ * and the rest of these targets came from the Mifflin-St Jeor formula or from an accepted weekly
+ * check-in — see {@link EnergySource} and {@code com.kcalma.checkin.AdaptiveTdeeService}.
+ */
 public record NutritionTargetsResponse(
         int calories,
         boolean floorApplied,
@@ -19,9 +26,12 @@ public record NutritionTargetsResponse(
         ProteinBasis proteinBasis,
         double proteinBasisKg,
         Double leanMassKg,
-        List<NoteResponse> notes) {
+        List<NoteResponse> notes,
+        EnergySource energySource,
+        LocalDate adaptiveSince) {
 
-    public static NutritionTargetsResponse from(NutritionCalculator.NutritionTargets targets) {
+    public static NutritionTargetsResponse from(
+            NutritionCalculator.NutritionTargets targets, EnergySource energySource, LocalDate adaptiveSince) {
         return new NutritionTargetsResponse(
                 targets.calories(),
                 targets.floorApplied(),
@@ -37,7 +47,9 @@ public record NutritionTargetsResponse(
                 targets.proteinBasis(),
                 targets.proteinBasisKg(),
                 targets.leanMassKg(),
-                targets.notes().stream().map(NoteResponse::from).toList());
+                targets.notes().stream().map(NoteResponse::from).toList(),
+                energySource,
+                adaptiveSince);
     }
 
     /** One {@code {code, message}} entry; {@code code} is a {@code NutritionCalculator.NoteCode} name. */

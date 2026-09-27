@@ -1,5 +1,6 @@
 package com.kcalma.food.dto;
 
+import com.kcalma.food.FoodEntry;
 import com.kcalma.food.FoodSource;
 import com.kcalma.food.NutritionMath;
 import com.kcalma.food.reference.ResolvedDish;
@@ -49,6 +50,44 @@ public record AnalyzedDishResponse(
                 dish.source(),
                 dish.fdcId(),
                 dish.matchedDescription(),
+                ingredients);
+    }
+
+    /**
+     * A saved {@link FoodEntry} re-shown in Dish form (recent dishes — see {@code
+     * com.kcalma.food.RecentDishService}). Unlike {@link #from(ResolvedDish)}, the per-100g/{@code
+     * totals} fields are the entry's own already-rounded, already-persisted values, not a fresh
+     * ingredient aggregation — {@code matchedDescription} is never persisted on a {@link
+     * com.kcalma.food.FoodEntry} (preview-only elsewhere), so it's always {@code null} here.
+     * {@code ingredients} stays {@code null} for any entry logged before V9 shipped (see {@link
+     * com.kcalma.food.FoodEntry#getIngredients()}), same "no breakdown" contract all the way through.
+     */
+    public static AnalyzedDishResponse from(FoodEntry entry) {
+        NutritionMath.Per100 per100 = new NutritionMath.Per100(
+                entry.getKcalPer100().doubleValue(),
+                entry.getProteinPer100().doubleValue(),
+                entry.getFatPer100().doubleValue(),
+                entry.getCarbsPer100().doubleValue(),
+                entry.getFiberPer100().doubleValue(),
+                entry.getSugarPer100().doubleValue(),
+                entry.getSodiumMgPer100().doubleValue());
+        NutritionMath.Totals totals = NutritionMath.totals(per100, entry.getGrams().doubleValue());
+        List<AnalyzedItemResponse> ingredients =
+                entry.getIngredients() == null ? null : entry.getIngredients().stream().map(AnalyzedItemResponse::from).toList();
+        return new AnalyzedDishResponse(
+                entry.getName(),
+                entry.getGrams(),
+                entry.getKcalPer100(),
+                entry.getProteinPer100(),
+                entry.getFatPer100(),
+                entry.getCarbsPer100(),
+                entry.getFiberPer100(),
+                entry.getSugarPer100(),
+                entry.getSodiumMgPer100(),
+                totals,
+                entry.getSource(),
+                entry.getFdcId(),
+                null,
                 ingredients);
     }
 

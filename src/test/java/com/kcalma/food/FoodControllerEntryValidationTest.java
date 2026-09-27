@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.kcalma.config.ClockConfig;
 import com.kcalma.food.analysis.FoodAnalyzer;
 import com.kcalma.food.reference.FoodReferenceMatcher;
 import com.kcalma.ratelimit.GeminiRateLimiter;
@@ -31,11 +32,12 @@ import org.springframework.test.web.servlet.MockMvc;
  * SecurityConfig} setup as {@link FoodControllerSecurityTest}.
  */
 @WebMvcTest(FoodController.class)
-@Import(SecurityConfig.class)
+@Import({SecurityConfig.class, ClockConfig.class})
 @TestPropertySource(properties = {
     "app.security.supabase-url=https://example.supabase.co",
     "app.security.owner-user-ids=11111111-1111-1111-1111-111111111111",
-    "app.security.allowed-origins=http://localhost:5173"
+    "app.security.allowed-origins=http://localhost:5173",
+    "app.timezone=America/Argentina/Buenos_Aires"
 })
 class FoodControllerEntryValidationTest {
 
@@ -50,6 +52,9 @@ class FoodControllerEntryValidationTest {
 
     @MockitoBean
     private FoodEntryService foodEntryService;
+
+    @MockitoBean
+    private RecentDishService recentDishService;
 
     @MockitoBean
     private FoodReferenceMatcher foodReferenceMatcher;

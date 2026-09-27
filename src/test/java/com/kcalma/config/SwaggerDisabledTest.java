@@ -5,6 +5,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 
 import com.kcalma.food.FoodController;
 import com.kcalma.food.FoodEntryService;
+import com.kcalma.food.RecentDishService;
 import com.kcalma.food.analysis.FoodAnalyzer;
 import com.kcalma.food.reference.FoodReferenceMatcher;
 import com.kcalma.ratelimit.GeminiRateLimiter;
@@ -27,11 +28,12 @@ import org.springframework.test.web.servlet.MockMvc;
  * the flag-on case.
  */
 @WebMvcTest(FoodController.class)
-@Import(SecurityConfig.class)
+@Import({SecurityConfig.class, ClockConfig.class})
 @TestPropertySource(properties = {
     "app.security.supabase-url=https://example.supabase.co",
     "app.security.owner-user-ids=11111111-1111-1111-1111-111111111111",
-    "app.security.allowed-origins=http://localhost:5173"
+    "app.security.allowed-origins=http://localhost:5173",
+    "app.timezone=America/Argentina/Buenos_Aires"
 })
 class SwaggerDisabledTest {
 
@@ -43,6 +45,9 @@ class SwaggerDisabledTest {
 
     @MockitoBean
     private FoodEntryService foodEntryService;
+
+    @MockitoBean
+    private RecentDishService recentDishService;
 
     @MockitoBean
     private FoodReferenceMatcher foodReferenceMatcher;

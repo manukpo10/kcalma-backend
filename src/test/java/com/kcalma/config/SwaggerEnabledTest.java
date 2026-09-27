@@ -5,6 +5,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.kcalma.food.FoodController;
 import com.kcalma.food.FoodEntryService;
+import com.kcalma.food.RecentDishService;
 import com.kcalma.food.analysis.FoodAnalyzer;
 import com.kcalma.food.reference.FoodReferenceMatcher;
 import com.kcalma.ratelimit.GeminiRateLimiter;
@@ -39,6 +40,7 @@ import org.springframework.test.web.servlet.MockMvc;
 @WebMvcTest(FoodController.class)
 @Import({
     SecurityConfig.class,
+    ClockConfig.class,
     OpenApiConfig.class,
     SpringDocConfiguration.class,
     SpringDocWebMvcConfiguration.class,
@@ -50,6 +52,7 @@ import org.springframework.test.web.servlet.MockMvc;
     "app.security.supabase-url=https://example.supabase.co",
     "app.security.owner-user-ids=11111111-1111-1111-1111-111111111111",
     "app.security.allowed-origins=http://localhost:5173",
+    "app.timezone=America/Argentina/Buenos_Aires",
     "SWAGGER_ENABLED=true",
     "springdoc.api-docs.enabled=true",
     "springdoc.swagger-ui.enabled=true"
@@ -64,6 +67,9 @@ class SwaggerEnabledTest {
 
     @MockitoBean
     private FoodEntryService foodEntryService;
+
+    @MockitoBean
+    private RecentDishService recentDishService;
 
     @MockitoBean
     private FoodReferenceMatcher foodReferenceMatcher;

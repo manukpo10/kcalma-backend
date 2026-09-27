@@ -1,6 +1,7 @@
 package com.kcalma.food;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
@@ -27,6 +28,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
  * Unit tests for {@link FoodEntryService}: the delete-a-whole-meal path (no real-DB/{@code
@@ -343,6 +345,57 @@ class FoodEntryServiceTest {
         // A dish backed by more than one ingredient has no single well-defined USDA row.
         assertThat(result.get().fdcId()).isNull();
         assertThat(result.get().grams()).isEqualByComparingTo("170");
+    }
+
+    @Test
+    void copyMeal_sourceMealIsEmpty_throws400WithExactSpanishMessage() {
+        LocalDate fromDate = LocalDate.of(2026, 9, 24);
+        LocalDate toDate = LocalDate.of(2026, 9, 25);
+        when(repository.findByUserIdAndEntryDateAndMealTypeOrderByCreatedAtAsc(userId, fromDate, MealType.DESAYUNO))
+                .thenReturn(List.of());
+
+        assertThatThrownBy(() -> newService().copyMeal(userId, fromDate, toDate, MealType.DESAYUNO))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getReason())
+                        .isEqualTo("No hay comidas para copiar en ese momento."));
+        verify(repository, never()).saveAll(anyList());
+    }
+
+    @Test
+    void copyMeal_sourceHasEntries_recreatesEachOneOnToDateUnderTheSameMealType() {
+        LocalDate fromDate = LocalDate.of(2026, 9, 24);
+        LocalDate toDate = LocalDate.of(2026, 9, 25);
+        FoodEntry source = new FoodEntry(
+                userId,
+                fromDate,
+                MealType.DESAYUNO,
+                "Tostadas",
+                new BigDecimal("80.00"),
+                new BigDecimal("250.00"),
+                new BigDecimal("8.00"),
+                new BigDecimal("5.00"),
+                new BigDecimal("40.00"),
+                new BigDecimal("2.00"),
+                new BigDecimal("3.00"),
+                new BigDecimal("400.00"),
+                FoodSource.MANUAL,
+                null,
+                List.of(ingredientEntity("Tostadas", "80", FoodSource.MANUAL, null)));
+        when(repository.findByUserIdAndEntryDateAndMealTypeOrderByCreatedAtAsc(userId, fromDate, MealType.DESAYUNO))
+                .thenReturn(List.of(source));
+        when(repository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
+        when(userFoodRepository.findByUserIdAndNormalizedName(any(), any())).thenReturn(Optional.empty());
+
+        List<FoodEntryResponse> created = newService().copyMeal(userId, fromDate, toDate, MealType.DESAYUNO);
+
+        assertThat(created).hasSize(1);
+        assertThat(created.get(0).entryDate()).isEqualTo(toDate);
+        assertThat(created.get(0).mealType()).isEqualTo(MealType.DESAYUNO);
+        assertThat(created.get(0).name()).isEqualTo("Tostadas");
+        assertThat(created.get(0).grams()).isEqualByComparingTo("80.00");
+        assertThat(created.get(0).ingredients()).hasSize(1);
+        // Repeating a meal still counts as "using" those foods again in the personal library.
+        verify(userFoodRepository).save(any(UserFood.class));
     }
 
     private FoodEntryService newService() {

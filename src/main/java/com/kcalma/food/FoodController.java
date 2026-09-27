@@ -4,8 +4,10 @@ import com.kcalma.food.ImageFormatDetector.ImageFormat;
 import com.kcalma.food.analysis.FoodAnalysisResult;
 import com.kcalma.food.analysis.FoodAnalyzer;
 import com.kcalma.food.dto.AnalyzeTextRequest;
+import com.kcalma.food.dto.CopyMealRequest;
 import com.kcalma.food.dto.FoodAnalysisResponse;
 import com.kcalma.food.dto.FoodEntryResponse;
+import com.kcalma.food.dto.RecentDishResponse;
 import com.kcalma.food.dto.SaveFoodEntriesRequest;
 import com.kcalma.food.dto.UpdateFoodEntryRequest;
 import com.kcalma.food.reference.FoodReferenceMatcher;
@@ -14,6 +16,7 @@ import com.kcalma.ratelimit.GeminiRateLimiter;
 import jakarta.validation.Valid;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.List;
@@ -44,18 +47,24 @@ public class FoodController {
 
     private final FoodAnalyzer analyzer;
     private final FoodEntryService entryService;
+    private final RecentDishService recentDishService;
     private final FoodReferenceMatcher referenceMatcher;
     private final GeminiRateLimiter rateLimiter;
+    private final Clock clock;
 
     public FoodController(
             FoodAnalyzer analyzer,
             FoodEntryService entryService,
+            RecentDishService recentDishService,
             FoodReferenceMatcher referenceMatcher,
-            GeminiRateLimiter rateLimiter) {
+            GeminiRateLimiter rateLimiter,
+            Clock clock) {
         this.analyzer = analyzer;
         this.entryService = entryService;
+        this.recentDishService = recentDishService;
         this.referenceMatcher = referenceMatcher;
         this.rateLimiter = rateLimiter;
+        this.clock = clock;
     }
 
     @PostMapping(value = "/analyze", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -99,6 +108,25 @@ public class FoodController {
         return ResponseEntity.ok(entryService.findByDate(userId, date));
     }
 
+    /** The caller's own dishes from the last 60 days, distinct by name, ranked by how often they come back. */
+    @GetMapping("/recent")
+    public ResponseEntity<List<RecentDishResponse>> recent(
+            @AuthenticationPrincipal Jwt jwt, @RequestParam(required = false) Integer limit) {
+        UUID userId = UUID.fromString(jwt.getSubject());
+        return ResponseEntity.ok(recentDishService.findRecent(userId, limit));
+    }
+
+    /** "Repeat a meal": re-logs one meal/day onto another day under the same meal type. */
+    @PostMapping("/entries/copy")
+    public ResponseEntity<List<FoodEntryResponse>> copyMeal(
+            @AuthenticationPrincipal Jwt jwt, @Valid @RequestBody CopyMealRequest request) {
+        UUID userId = UUID.fromString(jwt.getSubject());
+        validateNotFuture(request.fromDate());
+        validateNotFuture(request.toDate());
+        List<FoodEntryResponse> created = entryService.copyMeal(userId, request.fromDate(), request.toDate(), request.mealType());
+        return ResponseEntity.status(HttpStatus.CREATED).body(created);
+    }
+
     @PatchMapping("/entries/{id}")
     public ResponseEntity<FoodEntryResponse> updateEntry(
             @AuthenticationPrincipal Jwt jwt, @PathVariable UUID id, @Valid @RequestBody UpdateFoodEntryRequest request) {
@@ -128,6 +156,12 @@ public class FoodController {
         MealType parsedMealType = validateMealType(mealType);
         entryService.deleteAllByMeal(userId, parsedDate, parsedMealType);
         return ResponseEntity.noContent().build();
+    }
+
+    private void validateNotFuture(LocalDate date) {
+        if (date.isAfter(LocalDate.now(clock))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "La fecha no puede ser futura.");
+        }
     }
 
     private LocalDate validateDate(String date) {

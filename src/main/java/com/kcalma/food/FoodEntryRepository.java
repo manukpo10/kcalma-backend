@@ -13,8 +13,14 @@ public interface FoodEntryRepository extends JpaRepository<FoodEntry, UUID> {
 
     List<FoodEntry> findByUserIdAndEntryDateOrderByCreatedAtAsc(UUID userId, LocalDate entryDate);
 
+    /** One meal on one day — the source lookup for "repeat a meal" (see {@code FoodEntryService#copyMeal}). */
+    List<FoodEntry> findByUserIdAndEntryDateAndMealTypeOrderByCreatedAtAsc(UUID userId, LocalDate entryDate, MealType mealType);
+
     /** Every entry in a date range, oldest first — used to build the progress screen's nutrition history. */
     List<FoodEntry> findByUserIdAndEntryDateBetweenOrderByEntryDateAsc(UUID userId, LocalDate from, LocalDate to);
+
+    /** Every entry a user ever logged, oldest first — used by GET /api/export. */
+    List<FoodEntry> findByUserIdOrderByEntryDateAscCreatedAtAsc(UUID userId);
 
     /** Earliest logged date for a user — used to bound the "ALL" range on the progress screen. */
     Optional<FoodEntry> findFirstByUserIdOrderByEntryDateAsc(UUID userId);

@@ -32,4 +32,20 @@ public record FoodEntryIngredientRequest(
                 name, grams, kcalPer100, proteinPer100, fatPer100, carbsPer100, fiberPer100, sugarPer100,
                 sodiumMgPer100, source, fdcId);
     }
+
+    /** The inverse of {@link #toIngredient()} — used to replay a stored ingredient as a request, e.g. "repeat a meal". */
+    public static FoodEntryIngredientRequest from(FoodEntryIngredient ingredient) {
+        return new FoodEntryIngredientRequest(
+                ingredient.name(),
+                ingredient.grams(),
+                ingredient.kcalPer100(),
+                ingredient.proteinPer100(),
+                ingredient.fatPer100(),
+                ingredient.carbsPer100(),
+                ingredient.fiberPer100(),
+                ingredient.sugarPer100(),
+                ingredient.sodiumMgPer100(),
+                ingredient.source(),
+                ingredient.fdcId());
+    }
 }

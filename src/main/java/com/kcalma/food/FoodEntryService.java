@@ -14,8 +14,10 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class FoodEntryService {
@@ -164,6 +166,48 @@ public class FoodEntryService {
     @Transactional
     public void deleteAllByMeal(UUID userId, LocalDate date, MealType mealType) {
         repository.deleteByUserIdAndEntryDateAndMealType(userId, date, mealType);
+    }
+
+    /**
+     * "Repeat a meal": re-logs every entry from one meal/day onto another day, under the SAME meal
+     * type (e.g. "copy yesterday's breakfast to today's breakfast" — there's a single {@code
+     * mealType}, both the source selector and the destination bucket). Goes through {@link
+     * #saveAll} rather than a raw entity copy so the personal library ({@code app.user_food}) gets
+     * the same use-count bump a fresh log would give it — repeating a meal is still "using" those
+     * foods again.
+     *
+     * @throws ResponseStatusException 400 if the source meal has nothing to copy
+     */
+    @Transactional
+    public List<FoodEntryResponse> copyMeal(UUID userId, LocalDate fromDate, LocalDate toDate, MealType mealType) {
+        List<FoodEntry> source = repository.findByUserIdAndEntryDateAndMealTypeOrderByCreatedAtAsc(userId, fromDate, mealType);
+        if (source.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No hay comidas para copiar en ese momento.");
+        }
+        List<FoodEntryRequest> requests = source.stream().map(entry -> toCopyRequest(entry, toDate, mealType)).toList();
+        return saveAll(userId, requests);
+    }
+
+    /** One source entry reborn as a save request for the destination day — same dish, same breakdown, new date. */
+    private FoodEntryRequest toCopyRequest(FoodEntry entry, LocalDate toDate, MealType mealType) {
+        List<FoodEntryIngredientRequest> ingredients = entry.getIngredients() == null
+                ? null
+                : entry.getIngredients().stream().map(FoodEntryIngredientRequest::from).toList();
+        return new FoodEntryRequest(
+                toDate,
+                mealType,
+                entry.getName(),
+                entry.getGrams(),
+                entry.getKcalPer100(),
+                entry.getProteinPer100(),
+                entry.getFatPer100(),
+                entry.getCarbsPer100(),
+                entry.getFiberPer100(),
+                entry.getSugarPer100(),
+                entry.getSodiumMgPer100(),
+                entry.getSource(),
+                entry.getFdcId(),
+                ingredients);
     }
 
     private FoodEntry toEntity(UUID userId, FoodEntryRequest request) {

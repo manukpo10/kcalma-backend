@@ -1,6 +1,9 @@
 package com.kcalma.push;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -12,6 +15,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
 class PushSubscriptionServiceTest {
@@ -37,19 +42,57 @@ class PushSubscriptionServiceTest {
     }
 
     @Test
-    void subscribe_existingEndpoint_upsertsInPlaceInsteadOfCreatingADuplicateRow() {
-        UUID originalOwner = UUID.randomUUID();
-        UUID newOwner = UUID.randomUUID();
-        PushSubscription existing = new PushSubscription(originalOwner, "https://push.example/abc", "old-p256dh", "old-auth", "old-UA");
+    void subscribe_sameOwnerReSubscribing_upsertsInPlaceInsteadOfCreatingADuplicateRow() {
+        UUID userId = UUID.randomUUID();
+        PushSubscription existing = new PushSubscription(userId, "https://push.example/abc", "old-p256dh", "old-auth", "old-UA");
         when(repository.findByEndpoint("https://push.example/abc")).thenReturn(Optional.of(existing));
 
-        service.subscribe(newOwner, "https://push.example/abc", "new-p256dh", "new-auth", "new-UA");
+        service.subscribe(userId, "https://push.example/abc", "new-p256dh", "new-auth", "new-UA");
 
         verify(repository).save(existing);
-        assertThat(existing.getUserId()).isEqualTo(newOwner);
+        assertThat(existing.getUserId()).isEqualTo(userId);
         assertThat(existing.getP256dh()).isEqualTo("new-p256dh");
         assertThat(existing.getAuth()).isEqualTo("new-auth");
         assertThat(existing.getUserAgent()).isEqualTo("new-UA");
+    }
+
+    /** Shared-device re-subscribe: a different user, but the SAME browser (same keys) -- proof of possession, so ownership legitimately moves. */
+    @Test
+    void subscribe_differentOwnerWithMatchingKeys_reassignsOwnershipInPlace() {
+        UUID originalOwner = UUID.randomUUID();
+        UUID newOwner = UUID.randomUUID();
+        PushSubscription existing = new PushSubscription(originalOwner, "https://push.example/abc", "shared-p256dh", "shared-auth", "old-UA");
+        when(repository.findByEndpoint("https://push.example/abc")).thenReturn(Optional.of(existing));
+
+        service.subscribe(newOwner, "https://push.example/abc", "shared-p256dh", "shared-auth", "new-UA");
+
+        verify(repository).save(existing);
+        assertThat(existing.getUserId()).isEqualTo(newOwner);
+        assertThat(existing.getP256dh()).isEqualTo("shared-p256dh");
+        assertThat(existing.getAuth()).isEqualTo("shared-auth");
+        assertThat(existing.getUserAgent()).isEqualTo("new-UA");
+    }
+
+    /** Hijack attempt: a different user, and keys that DON'T match the stored subscription -- no proof of possession, so it's rejected instead of stolen. */
+    @Test
+    void subscribe_differentOwnerWithMismatchedKeys_rejectsWithConflictAndLeavesTheRowUntouched() {
+        UUID originalOwner = UUID.randomUUID();
+        UUID attacker = UUID.randomUUID();
+        PushSubscription existing = new PushSubscription(originalOwner, "https://push.example/abc", "victim-p256dh", "victim-auth", "victim-UA");
+        when(repository.findByEndpoint("https://push.example/abc")).thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> service.subscribe(attacker, "https://push.example/abc", "attacker-p256dh", "attacker-auth", "attacker-UA"))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> {
+                    ResponseStatusException responseStatusException = (ResponseStatusException) ex;
+                    assertThat(responseStatusException.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(responseStatusException.getReason()).isEqualTo(PushSubscriptionService.OWNERSHIP_CONFLICT_MESSAGE);
+                });
+
+        verify(repository, never()).save(any());
+        assertThat(existing.getUserId()).isEqualTo(originalOwner);
+        assertThat(existing.getP256dh()).isEqualTo("victim-p256dh");
+        assertThat(existing.getAuth()).isEqualTo("victim-auth");
     }
 
     @Test

@@ -96,9 +96,9 @@ public class PushSubscription {
 
     /**
      * Re-establishes every mutable field on a {@code POST /api/push/subscriptions} upsert,
-     * including {@code userId} — a re-subscribe from the same browser (same {@code endpoint})
-     * always re-claims the row for whoever is subscribing now, rather than leaving it pointing at
-     * a stale owner.
+     * including {@code userId}. Unconditional -- it doesn't itself check who's allowed to claim this
+     * row; {@link PushSubscriptionService#subscribe} decides that (proof of possession when the
+     * caller isn't already the owner) before ever calling this.
      */
     void update(UUID userId, String p256dh, String auth, String userAgent) {
         this.userId = userId;

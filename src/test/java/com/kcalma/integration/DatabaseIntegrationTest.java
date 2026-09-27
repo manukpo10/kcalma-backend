@@ -63,9 +63,11 @@ import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpStatus;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.web.server.ResponseStatusException;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -706,23 +708,52 @@ class DatabaseIntegrationTest {
     /**
      * Shared-device re-subscribe (see {@code PushSubscriptionService#subscribe}): {@code endpoint}
      * is globally unique, so a second browser subscription for the SAME endpoint from a DIFFERENT
-     * user must move ownership rather than duplicate or fail — this is the intended multi-user
-     * behavior, not a bug (see the DELETE /api/account work's IDOR audit).
+     * user moves ownership rather than duplicating or failing -- but only as proof of possession,
+     * i.e. the SAME browser keys re-subscribing on a shared device. This is the intended multi-user
+     * behavior, not a bug (see the DELETE /api/account work's IDOR audit). The mismatched-keys case
+     * (a hijack attempt, not a real shared device) is covered by {@link
+     * #pushSubscription_reSubscribeFromAnotherUserWithMismatchedKeys_rejectsWithConflictThroughTheRealDatabase}.
      */
     @Test
-    void pushSubscription_reSubscribeFromAnotherUser_movesOwnershipToTheNewUserThroughTheRealDatabase() throws SQLException {
+    void pushSubscription_reSubscribeFromAnotherUserWithMatchingKeys_movesOwnershipToTheNewUserThroughTheRealDatabase() throws SQLException {
         UUID userA = UUID.randomUUID();
         UUID userB = UUID.randomUUID();
         String endpoint = "https://push.example/shared-device/" + UUID.randomUUID();
 
-        pushSubscriptionService.subscribe(userA, endpoint, "p256dh-a", "auth-a", "UA-a");
+        pushSubscriptionService.subscribe(userA, endpoint, "shared-p256dh", "shared-auth", "UA-a");
         assertOwnerForEndpoint(endpoint, userA);
 
-        pushSubscriptionService.subscribe(userB, endpoint, "p256dh-b", "auth-b", "UA-b");
+        // Same physical device/browser re-subscribing -- same p256dh/auth keys, different user logged in.
+        pushSubscriptionService.subscribe(userB, endpoint, "shared-p256dh", "shared-auth", "UA-b");
 
         assertRowCountForEndpoint(endpoint, 1); // still one row -- moved, never duplicated
         assertOwnerForEndpoint(endpoint, userB);
-        assertP256dhForEndpoint(endpoint, "p256dh-b");
+        assertP256dhForEndpoint(endpoint, "shared-p256dh");
+    }
+
+    /**
+     * The hijack case {@code PushSubscriptionService#subscribe} now guards against: knowing another
+     * user's {@code endpoint} alone (e.g. leaked via logs) is not proof of possession -- without the
+     * matching {@code p256dh}/{@code auth} keys, the reassignment must be rejected with 409 and the
+     * victim's row must survive completely untouched.
+     */
+    @Test
+    void pushSubscription_reSubscribeFromAnotherUserWithMismatchedKeys_rejectsWithConflictThroughTheRealDatabase() throws SQLException {
+        UUID victim = UUID.randomUUID();
+        UUID attacker = UUID.randomUUID();
+        String endpoint = "https://push.example/hijack-attempt/" + UUID.randomUUID();
+
+        pushSubscriptionService.subscribe(victim, endpoint, "victim-p256dh", "victim-auth", "UA-victim");
+        assertOwnerForEndpoint(endpoint, victim);
+
+        assertThatThrownBy(() ->
+                        pushSubscriptionService.subscribe(attacker, endpoint, "attacker-p256dh", "attacker-auth", "UA-attacker"))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode()).isEqualTo(HttpStatus.CONFLICT));
+
+        assertRowCountForEndpoint(endpoint, 1); // untouched -- no duplicate, no takeover
+        assertOwnerForEndpoint(endpoint, victim);
+        assertP256dhForEndpoint(endpoint, "victim-p256dh");
     }
 
     /**

@@ -12,4 +12,7 @@ interface PushSubscriptionRepository extends JpaRepository<PushSubscription, UUI
     List<PushSubscription> findByUserId(UUID userId);
 
     void deleteByUserIdAndEndpoint(UUID userId, String endpoint);
+
+    /** Bulk-deletes every subscription a user ever registered — used by account deletion (via {@code PushSubscriptionService}). */
+    void deleteByUserId(UUID userId);
 }

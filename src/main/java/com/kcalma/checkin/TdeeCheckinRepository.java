@@ -5,6 +5,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface TdeeCheckinRepository extends JpaRepository<TdeeCheckin, UUID> {
 
@@ -16,4 +19,9 @@ public interface TdeeCheckinRepository extends JpaRepository<TdeeCheckin, UUID> 
 
     /** Every past (strictly before {@code weekStart}) week, most recent first — the source list for GET /api/checkin/history. */
     List<TdeeCheckin> findByUserIdAndWeekStartLessThanOrderByWeekStartDesc(UUID userId, LocalDate weekStart);
+
+    /** Bulk-deletes every check-in week a user ever had — used by account deletion ({@code com.kcalma.account.AccountService}). */
+    @Modifying
+    @Query("DELETE FROM TdeeCheckin t WHERE t.userId = :userId")
+    void deleteByUserId(@Param("userId") UUID userId);
 }

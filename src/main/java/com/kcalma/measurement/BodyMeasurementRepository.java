@@ -5,6 +5,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface BodyMeasurementRepository extends JpaRepository<BodyMeasurement, UUID> {
 
@@ -17,4 +20,9 @@ public interface BodyMeasurementRepository extends JpaRepository<BodyMeasurement
 
     /** The most recent row (any date) that has a body-fat reading — drives the profile propagation/fallback in {@code MeasurementService}. */
     Optional<BodyMeasurement> findFirstByUserIdAndBodyFatPctIsNotNullOrderByMeasuredOnDesc(UUID userId);
+
+    /** Bulk-deletes every measurement a user ever logged — used by account deletion ({@code com.kcalma.account.AccountService}). */
+    @Modifying
+    @Query("DELETE FROM BodyMeasurement b WHERE b.userId = :userId")
+    void deleteByUserId(@Param("userId") UUID userId);
 }

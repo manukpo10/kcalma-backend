@@ -28,4 +28,14 @@ public class PushSubscriptionService {
     public void unsubscribe(UUID userId, String endpoint) {
         repository.deleteByUserIdAndEndpoint(userId, endpoint);
     }
+
+    /**
+     * Deletes every subscription for {@code userId} — used by account deletion ({@code
+     * com.kcalma.account.AccountService}), which lives outside this package and so can't reach the
+     * package-private {@link PushSubscriptionRepository} directly.
+     */
+    @Transactional
+    public void deleteAllForUser(UUID userId) {
+        repository.deleteByUserId(userId);
+    }
 }

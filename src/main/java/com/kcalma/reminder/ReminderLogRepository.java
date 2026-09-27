@@ -31,4 +31,10 @@ public interface ReminderLogRepository extends JpaRepository<ReminderLog, Remind
                     + "ON CONFLICT (user_id, reminder_key, sent_on) DO NOTHING",
             nativeQuery = true)
     int claim(@Param("userId") UUID userId, @Param("reminderKey") String reminderKey, @Param("sentOn") LocalDate sentOn);
+
+    /** Bulk-deletes every dedupe-ledger row a user ever had — used by account deletion ({@code com.kcalma.account.AccountService}). */
+    @Transactional
+    @Modifying
+    @Query("DELETE FROM ReminderLog r WHERE r.userId = :userId")
+    void deleteByUserId(@Param("userId") UUID userId);
 }

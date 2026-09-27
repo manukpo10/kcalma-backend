@@ -36,4 +36,9 @@ public interface FoodEntryRepository extends JpaRepository<FoodEntry, UUID> {
     @Query("DELETE FROM FoodEntry f WHERE f.userId = :userId AND f.entryDate = :entryDate AND f.mealType = :mealType")
     void deleteByUserIdAndEntryDateAndMealType(
             @Param("userId") UUID userId, @Param("entryDate") LocalDate entryDate, @Param("mealType") MealType mealType);
+
+    /** Bulk-deletes every entry a user ever logged — used by account deletion ({@code com.kcalma.account.AccountService}). */
+    @Modifying
+    @Query("DELETE FROM FoodEntry f WHERE f.userId = :userId")
+    void deleteByUserId(@Param("userId") UUID userId);
 }

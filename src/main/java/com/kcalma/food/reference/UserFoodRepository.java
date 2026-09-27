@@ -3,10 +3,16 @@ package com.kcalma.food.reference;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface UserFoodRepository extends JpaRepository<UserFood, UUID> {
+
+    /** Bulk-deletes a user's whole personal food library — used by account deletion ({@code com.kcalma.account.AccountService}). */
+    @Modifying
+    @Query("DELETE FROM UserFood u WHERE u.userId = :userId")
+    void deleteByUserId(@Param("userId") UUID userId);
 
     /** Exact-name lookup — priority (1a) in {@link FoodReferenceMatcher}. */
     Optional<UserFood> findByUserIdAndNormalizedName(UUID userId, String normalizedName);

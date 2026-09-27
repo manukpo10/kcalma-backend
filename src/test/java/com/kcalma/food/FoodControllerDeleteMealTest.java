@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.kcalma.food.analysis.FoodAnalyzer;
 import com.kcalma.food.reference.FoodReferenceMatcher;
+import com.kcalma.ratelimit.GeminiRateLimiter;
 import com.kcalma.security.SecurityConfig;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -57,6 +58,9 @@ class FoodControllerDeleteMealTest {
 
     @MockitoBean
     private FoodReferenceMatcher foodReferenceMatcher;
+
+    @MockitoBean
+    private GeminiRateLimiter geminiRateLimiter;
 
     @MockitoBean
     private JwtDecoder jwtDecoder;

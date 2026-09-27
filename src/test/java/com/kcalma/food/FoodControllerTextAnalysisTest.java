@@ -17,6 +17,7 @@ import com.kcalma.food.analysis.FoodAnalyzer;
 import com.kcalma.food.reference.FoodReferenceMatcher;
 import com.kcalma.food.reference.ResolvedDish;
 import com.kcalma.food.reference.ResolvedFoodItem;
+import com.kcalma.ratelimit.GeminiRateLimiter;
 import com.kcalma.security.SecurityConfig;
 import java.time.Instant;
 import java.util.List;
@@ -66,6 +67,9 @@ class FoodControllerTextAnalysisTest {
 
     @MockitoBean
     private FoodReferenceMatcher foodReferenceMatcher;
+
+    @MockitoBean
+    private GeminiRateLimiter geminiRateLimiter;
 
     @MockitoBean
     private JwtDecoder jwtDecoder;

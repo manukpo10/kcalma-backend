@@ -7,6 +7,7 @@ import com.kcalma.food.FoodController;
 import com.kcalma.food.FoodEntryService;
 import com.kcalma.food.analysis.FoodAnalyzer;
 import com.kcalma.food.reference.FoodReferenceMatcher;
+import com.kcalma.ratelimit.GeminiRateLimiter;
 import com.kcalma.security.SecurityConfig;
 import org.junit.jupiter.api.Test;
 import org.springdoc.core.configuration.SpringDocConfiguration;
@@ -66,6 +67,9 @@ class SwaggerEnabledTest {
 
     @MockitoBean
     private FoodReferenceMatcher foodReferenceMatcher;
+
+    @MockitoBean
+    private GeminiRateLimiter geminiRateLimiter;
 
     @MockitoBean
     private JwtDecoder jwtDecoder;

@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.kcalma.food.MealType;
 import com.kcalma.food.NutritionMath;
+import com.kcalma.ratelimit.GeminiRateLimiter;
 import com.kcalma.security.SecurityConfig;
 import com.kcalma.suggestions.dto.SuggestionResponse;
 import java.time.Instant;
@@ -47,6 +48,9 @@ class SuggestionControllerSecurityTest {
 
     @MockitoBean
     private SuggestionService suggestionService;
+
+    @MockitoBean
+    private GeminiRateLimiter geminiRateLimiter;
 
     @MockitoBean
     private JwtDecoder jwtDecoder;

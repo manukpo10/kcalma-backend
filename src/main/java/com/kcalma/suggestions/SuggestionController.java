@@ -1,6 +1,7 @@
 package com.kcalma.suggestions;
 
 import com.kcalma.food.MealType;
+import com.kcalma.ratelimit.GeminiRateLimiter;
 import com.kcalma.suggestions.dto.SuggestionRequest;
 import com.kcalma.suggestions.dto.SuggestionResponse;
 import java.time.LocalDate;
@@ -23,14 +24,17 @@ public class SuggestionController {
     private static final int MAX_PREFERENCES_LENGTH = 300;
 
     private final SuggestionService suggestionService;
+    private final GeminiRateLimiter rateLimiter;
 
-    public SuggestionController(SuggestionService suggestionService) {
+    public SuggestionController(SuggestionService suggestionService, GeminiRateLimiter rateLimiter) {
         this.suggestionService = suggestionService;
+        this.rateLimiter = rateLimiter;
     }
 
     @PostMapping("/suggestions")
     public ResponseEntity<SuggestionResponse> suggest(
             @AuthenticationPrincipal Jwt jwt, @RequestBody(required = false) SuggestionRequest request) {
+        rateLimiter.checkAndRecord(jwt.getSubject());
         UUID userId = UUID.fromString(jwt.getSubject());
         LocalDate date = validateDate(request == null ? null : request.date());
         MealType mealType = validateMealType(request == null ? null : request.mealType());

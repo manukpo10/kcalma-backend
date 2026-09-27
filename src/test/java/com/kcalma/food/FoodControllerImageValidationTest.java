@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.kcalma.food.analysis.FoodAnalyzer;
 import com.kcalma.food.reference.FoodReferenceMatcher;
+import com.kcalma.ratelimit.GeminiRateLimiter;
 import com.kcalma.security.SecurityConfig;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -50,6 +51,9 @@ class FoodControllerImageValidationTest {
 
     @MockitoBean
     private FoodReferenceMatcher foodReferenceMatcher;
+
+    @MockitoBean
+    private GeminiRateLimiter geminiRateLimiter;
 
     @MockitoBean
     private JwtDecoder jwtDecoder;

@@ -14,6 +14,7 @@ import com.kcalma.food.analysis.FoodAnalysisException;
 import com.kcalma.food.dto.AnalyzedDishResponse;
 import com.kcalma.food.reference.ResolvedDish;
 import com.kcalma.food.reference.ResolvedFoodItem;
+import com.kcalma.ratelimit.GeminiRateLimiter;
 import com.kcalma.security.SecurityConfig;
 import com.kcalma.suggestions.dto.SuggestionOptionResponse;
 import com.kcalma.suggestions.dto.SuggestionResponse;
@@ -59,6 +60,9 @@ class SuggestionControllerTest {
 
     @MockitoBean
     private SuggestionService suggestionService;
+
+    @MockitoBean
+    private GeminiRateLimiter geminiRateLimiter;
 
     @MockitoBean
     private JwtDecoder jwtDecoder;

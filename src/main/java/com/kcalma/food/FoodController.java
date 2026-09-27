@@ -10,6 +10,7 @@ import com.kcalma.food.dto.SaveFoodEntriesRequest;
 import com.kcalma.food.dto.UpdateFoodEntryRequest;
 import com.kcalma.food.reference.FoodReferenceMatcher;
 import com.kcalma.food.reference.ResolvedDish;
+import com.kcalma.ratelimit.GeminiRateLimiter;
 import jakarta.validation.Valid;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -44,16 +45,23 @@ public class FoodController {
     private final FoodAnalyzer analyzer;
     private final FoodEntryService entryService;
     private final FoodReferenceMatcher referenceMatcher;
+    private final GeminiRateLimiter rateLimiter;
 
-    public FoodController(FoodAnalyzer analyzer, FoodEntryService entryService, FoodReferenceMatcher referenceMatcher) {
+    public FoodController(
+            FoodAnalyzer analyzer,
+            FoodEntryService entryService,
+            FoodReferenceMatcher referenceMatcher,
+            GeminiRateLimiter rateLimiter) {
         this.analyzer = analyzer;
         this.entryService = entryService;
         this.referenceMatcher = referenceMatcher;
+        this.rateLimiter = rateLimiter;
     }
 
     @PostMapping(value = "/analyze", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<FoodAnalysisResponse> analyze(
             @AuthenticationPrincipal Jwt jwt, @RequestParam("image") MultipartFile image) {
+        rateLimiter.checkAndRecord(jwt.getSubject());
         validatePresenceAndSize(image);
         byte[] imageBytes = readBytes(image);
         ImageFormat format = detectFormat(imageBytes);
@@ -64,6 +72,7 @@ public class FoodController {
     @PostMapping("/analyze-text")
     public ResponseEntity<FoodAnalysisResponse> analyzeText(
             @AuthenticationPrincipal Jwt jwt, @RequestBody(required = false) AnalyzeTextRequest request) {
+        rateLimiter.checkAndRecord(jwt.getSubject());
         String description = validateDescription(request == null ? null : request.description());
         FoodAnalysisResult result = analyzer.analyzeDescription(description);
         return ResponseEntity.ok(resolveAndBuildResponse(jwt, result));

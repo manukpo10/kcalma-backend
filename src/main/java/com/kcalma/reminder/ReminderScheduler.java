@@ -30,6 +30,12 @@ import org.springframework.stereotype.Component;
  * ReminderLogRepository#claim}'s javadoc for why claim-then-send (never the other order) is what
  * makes double-sending impossible across restarts or overlapping ticks.
  *
+ * <p>Claiming is skipped entirely when {@link PushDispatchService#hasSubscriptions} says the user
+ * has nothing to send to, and is released again (the {@code reminder_log} row deleted) when {@link
+ * PushDispatchService.DispatchOutcome#shouldRetryLater()} says every subscription failed
+ * transiently — in both cases so a later tick inside {@link DueReminderEvaluator}'s catch-up window
+ * gets to try again, rather than one bad minute silently losing the occurrence for the whole day.
+ *
  * <p>{@code kcalma.reminders.scheduler-enabled} (env {@code REMINDERS_SCHEDULER_ENABLED}, default
  * {@code true}) is an operational kill switch: when {@code false}, {@link #tick} returns
  * immediately and sends nothing, but every {@code /api/push/**}/{@code /api/reminders} endpoint
@@ -98,9 +104,19 @@ public class ReminderScheduler {
     private void processUser(UUID userId, LocalDateTime now, LocalDate today, ReminderSettingsData settings) {
         DueReminderEvaluator.Signals signals = gatherSignals(userId, today);
         List<DueReminderEvaluator.Due> due = evaluator.evaluate(now, settings, signals);
+        if (due.isEmpty() || !dispatchService.hasSubscriptions(userId)) {
+            return; // nothing due, or nobody to send to -- never claim a slot we can't actually deliver
+        }
         for (DueReminderEvaluator.Due reminder : due) {
             if (logRepository.claim(userId, reminder.reminderKey(), today) == 1) {
-                dispatchService.sendToUser(userId, new PushPayload(reminder.title(), reminder.body(), reminder.url()));
+                PushDispatchService.DispatchOutcome outcome =
+                        dispatchService.dispatchToUser(userId, new PushPayload(reminder.title(), reminder.body(), reminder.url()));
+                if (outcome.shouldRetryLater()) {
+                    // Every subscription failed transiently (5xx/timeout/429) and none succeeded --
+                    // release the claim so a tick later in the catch-up window retries this occurrence,
+                    // instead of the dedupe row silently losing it for the rest of the day.
+                    logRepository.deleteById(new ReminderLogId(userId, reminder.reminderKey(), today));
+                }
             }
             // claim() == 0 means some earlier call (a previous tick, or an overlapping one) already
             // sent this exact occurrence -- correctly skip, not an error.

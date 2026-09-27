@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -11,6 +12,7 @@ import static org.mockito.Mockito.when;
 import com.kcalma.food.FoodEntryRepository;
 import com.kcalma.profile.ProfileService;
 import com.kcalma.push.PushDispatchService;
+import com.kcalma.push.PushDispatchService.DispatchOutcome;
 import com.kcalma.push.PushPayload;
 import com.kcalma.water.WaterLogRepository;
 import com.kcalma.weight.WeightEntryRepository;
@@ -79,16 +81,19 @@ class ReminderSchedulerTest {
         UUID userId = UUID.randomUUID();
         ReminderSettingsData settings = ReminderSettingsData.defaults();
         stubEmptySignalsFor(userId, settings);
+        when(dispatchService.hasSubscriptions(userId)).thenReturn(true);
         DueReminderEvaluator.Due due = new DueReminderEvaluator.Due("MEAL_ALMUERZO", "¿Qué almorzaste?", "body", "/agregar?meal=ALMUERZO");
         when(evaluator.evaluate(any(), eq(settings), any())).thenReturn(List.of(due));
         when(logRepository.claim(userId, "MEAL_ALMUERZO", TODAY)).thenReturn(1);
+        when(dispatchService.dispatchToUser(eq(userId), any())).thenReturn(new DispatchOutcome(1, false));
 
         schedulerWith(true, fixedClockAt(LocalTime.of(13, 0))).tick();
 
         verify(dispatchService)
-                .sendToUser(
+                .dispatchToUser(
                         eq(userId),
                         argThat((PushPayload payload) -> payload.title().equals("¿Qué almorzaste?") && payload.url().equals("/agregar?meal=ALMUERZO")));
+        verify(logRepository, never()).deleteById(any()); // delivered fine -- the claim must stay
     }
 
     @Test
@@ -96,13 +101,86 @@ class ReminderSchedulerTest {
         UUID userId = UUID.randomUUID();
         ReminderSettingsData settings = ReminderSettingsData.defaults();
         stubEmptySignalsFor(userId, settings);
+        when(dispatchService.hasSubscriptions(userId)).thenReturn(true);
         DueReminderEvaluator.Due due = new DueReminderEvaluator.Due("WEIGH_IN", "t", "b", "/progreso");
         when(evaluator.evaluate(any(), eq(settings), any())).thenReturn(List.of(due));
         when(logRepository.claim(userId, "WEIGH_IN", TODAY)).thenReturn(0); // some other call already claimed it
 
         schedulerWith(true, fixedClockAt(LocalTime.of(8, 0))).tick();
 
-        verify(dispatchService, never()).sendToUser(any(), any());
+        verify(dispatchService, never()).dispatchToUser(any(), any());
+    }
+
+    @Test
+    void tick_userHasNoSubscriptions_neverClaimsSoALaterTickCanOnceTheyDoSubscribe() {
+        UUID userId = UUID.randomUUID();
+        ReminderSettingsData settings = ReminderSettingsData.defaults();
+        stubEmptySignalsFor(userId, settings);
+        when(dispatchService.hasSubscriptions(userId)).thenReturn(false);
+        DueReminderEvaluator.Due due = new DueReminderEvaluator.Due("WEIGH_IN", "t", "b", "/progreso");
+        when(evaluator.evaluate(any(), eq(settings), any())).thenReturn(List.of(due));
+
+        schedulerWith(true, fixedClockAt(LocalTime.of(8, 0))).tick();
+
+        verifyNoInteractions(logRepository);
+        verify(dispatchService, never()).dispatchToUser(any(), any());
+    }
+
+    /** {@code PushDispatchService.DispatchOutcome#shouldRetryLater()} is exactly the signal this release depends on. */
+    @Test
+    void tick_dispatchFailsTransientlyForEveryone_releasesTheClaimSoALaterTickInsideTheCatchUpWindowRetries() {
+        UUID userId = UUID.randomUUID();
+        ReminderSettingsData settings = ReminderSettingsData.defaults();
+        stubEmptySignalsFor(userId, settings);
+        when(dispatchService.hasSubscriptions(userId)).thenReturn(true);
+        DueReminderEvaluator.Due due = new DueReminderEvaluator.Due("MEAL_ALMUERZO", "t", "b", "/agregar?meal=ALMUERZO");
+        when(evaluator.evaluate(any(), eq(settings), any())).thenReturn(List.of(due));
+        when(logRepository.claim(userId, "MEAL_ALMUERZO", TODAY)).thenReturn(1);
+        when(dispatchService.dispatchToUser(eq(userId), any())).thenReturn(new DispatchOutcome(0, true));
+
+        schedulerWith(true, fixedClockAt(LocalTime.of(13, 0))).tick();
+
+        verify(logRepository).deleteById(new ReminderLogId(userId, "MEAL_ALMUERZO", TODAY));
+    }
+
+    @Test
+    void tick_dispatchPartiallySucceeds_keepsTheClaimRatherThanResendingToTheOnesThatAlreadyWorked() {
+        UUID userId = UUID.randomUUID();
+        ReminderSettingsData settings = ReminderSettingsData.defaults();
+        stubEmptySignalsFor(userId, settings);
+        when(dispatchService.hasSubscriptions(userId)).thenReturn(true);
+        DueReminderEvaluator.Due due = new DueReminderEvaluator.Due("MEAL_ALMUERZO", "t", "b", "/agregar?meal=ALMUERZO");
+        when(evaluator.evaluate(any(), eq(settings), any())).thenReturn(List.of(due));
+        when(logRepository.claim(userId, "MEAL_ALMUERZO", TODAY)).thenReturn(1);
+        when(dispatchService.dispatchToUser(eq(userId), any())).thenReturn(new DispatchOutcome(1, true));
+
+        schedulerWith(true, fixedClockAt(LocalTime.of(13, 0))).tick();
+
+        verify(logRepository, never()).deleteById(any());
+    }
+
+    @Test
+    void tick_afterATransientFailureReleasesTheClaim_aLaterTickClaimsAgainAndSucceeds() {
+        UUID userId = UUID.randomUUID();
+        ReminderSettingsData settings = ReminderSettingsData.defaults();
+        stubEmptySignalsFor(userId, settings);
+        when(dispatchService.hasSubscriptions(userId)).thenReturn(true);
+        DueReminderEvaluator.Due due = new DueReminderEvaluator.Due("MEAL_ALMUERZO", "t", "b", "/agregar?meal=ALMUERZO");
+        when(evaluator.evaluate(any(), eq(settings), any())).thenReturn(List.of(due));
+        // Both ticks see claim() == 1: in the real repository that's exactly what happens once the
+        // first tick's release (the deleteById below) frees the row for the second tick's own
+        // INSERT ... ON CONFLICT to land.
+        when(logRepository.claim(userId, "MEAL_ALMUERZO", TODAY)).thenReturn(1);
+        when(dispatchService.dispatchToUser(eq(userId), any()))
+                .thenReturn(new DispatchOutcome(0, true))
+                .thenReturn(new DispatchOutcome(1, false));
+
+        ReminderScheduler scheduler = schedulerWith(true, fixedClockAt(LocalTime.of(13, 0)));
+        scheduler.tick(); // transient failure -- releases the claim
+        scheduler.tick(); // a later tick, still inside the catch-up window -- claims again and succeeds
+
+        verify(logRepository, times(2)).claim(userId, "MEAL_ALMUERZO", TODAY);
+        verify(logRepository, times(1)).deleteById(new ReminderLogId(userId, "MEAL_ALMUERZO", TODAY));
     }
 
     @Test
@@ -127,13 +205,15 @@ class ReminderSchedulerTest {
         when(foodEntryRepository.findByUserIdAndEntryDateOrderByCreatedAtAsc(brokenUser, TODAY))
                 .thenThrow(new RuntimeException("boom"));
         stubEmptySignalsExceptFindAllFor(healthyUser);
+        when(dispatchService.hasSubscriptions(healthyUser)).thenReturn(true);
         DueReminderEvaluator.Due due = new DueReminderEvaluator.Due("WEIGH_IN", "t", "b", "/progreso");
         when(evaluator.evaluate(any(), eq(settings), any())).thenReturn(List.of(due));
         when(logRepository.claim(healthyUser, "WEIGH_IN", TODAY)).thenReturn(1);
+        when(dispatchService.dispatchToUser(eq(healthyUser), any())).thenReturn(new DispatchOutcome(1, false));
 
         schedulerWith(true, fixedClockAt(LocalTime.of(8, 0))).tick();
 
-        verify(dispatchService).sendToUser(eq(healthyUser), any());
+        verify(dispatchService).dispatchToUser(eq(healthyUser), any());
     }
 
     private void stubEmptySignalsFor(UUID userId, ReminderSettingsData settings) {

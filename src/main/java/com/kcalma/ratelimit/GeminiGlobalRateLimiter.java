@@ -14,7 +14,8 @@ import org.springframework.stereotype.Component;
  * that), on top of the three Gemini-backed endpoints' existing per-user quota. Two sliding windows
  * apply, either one can reject a call: a per-minute burst window ({@code
  * app.global-rate-limit.per-minute}, default 10) and a daily window ({@code
- * app.global-rate-limit.per-day}, default 500).
+ * app.global-rate-limit.per-day}, default 400 — see {@link GlobalRateLimitProperties} for why
+ * that's lower than Google's raw quota).
  *
  * <p>Same hand-rolled sliding-window-log shape as {@link GeminiRateLimiter}'s {@code
  * RequestWindow}, just a single instance-wide window instead of one per user — thread safety is a

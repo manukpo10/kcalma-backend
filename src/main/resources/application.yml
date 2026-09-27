@@ -46,16 +46,23 @@ app:
     base-url: https://generativelanguage.googleapis.com
   rate-limit:
     enabled: ${RATE_LIMIT_ENABLED:true}
+    # Keeps one user's own ceiling comfortably below app.global-rate-limit.per-minute below (10/min
+    # shared by everyone) -- without this, one account's own burst window alone could consume the
+    # whole app-wide per-minute cap and lock out every other user. Applies to admins too.
+    per-minute-requests: ${GEMINI_USER_PER_MINUTE:4}
     window-requests: ${GEMINI_USER_PER_10MIN:20}
     window-minutes: ${RATE_LIMIT_WINDOW_MINUTES:10}
     # Lowered from a single-owner-era 150: with open registration, ~10 users must share one
-    # project's free Gemini quota (~500/day total -- see app.global-rate-limit below).
+    # project's free Gemini quota (~400/day total -- see app.global-rate-limit below).
     daily-requests: ${GEMINI_USER_PER_DAY:50}
   # Shared across every user, on top of each user's own app.rate-limit above -- protects the
   # whole app's free-tier Gemini quota now that sign-up is open. Admins (owner-user-ids) skip it.
   global-rate-limit:
     per-minute: ${GEMINI_GLOBAL_PER_MINUTE:10}
-    per-day: ${GEMINI_GLOBAL_PER_DAY:500}
+    # Set this to ~80% of the project's real requests-per-day quota shown in Google AI Studio
+    # (Google's own free-tier default is ~500 RPD at the time of writing) -- headroom for quota
+    # drift and other callers on the same project, not the raw quota number itself.
+    per-day: ${GEMINI_GLOBAL_PER_DAY:400}
   push:
     public-key: ${VAPID_PUBLIC_KEY:}
     private-key: ${VAPID_PRIVATE_KEY:}

@@ -3,6 +3,7 @@ package com.kcalma.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.kcalma.account.AccountService;
 import com.kcalma.checkin.CheckinStatus;
 import com.kcalma.checkin.Confidence;
 import com.kcalma.checkin.TdeeAdaptationCalculator;
@@ -39,6 +40,8 @@ import com.kcalma.reminder.ReminderSettingsData;
 import com.kcalma.reminder.ReminderSettingsRepository;
 import com.kcalma.water.WaterLog;
 import com.kcalma.water.WaterLogRepository;
+import com.kcalma.weight.WeightEntry;
+import com.kcalma.weight.WeightEntryRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import java.math.BigDecimal;
@@ -148,6 +151,12 @@ class DatabaseIntegrationTest {
 
     @Autowired
     private ReminderLogRepository reminderLogRepository;
+
+    @Autowired
+    private WeightEntryRepository weightEntryRepository;
+
+    @Autowired
+    private AccountService accountService;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -692,5 +701,182 @@ class DatabaseIntegrationTest {
 
         assertThat(reminderLogRepository.claim(userId, "WATER_14:00", day)).isEqualTo(1); // different key, same day -- independent
         assertThat(reminderLogRepository.claim(userId, "MEAL_ALMUERZO", day.plusDays(1))).isEqualTo(1); // same key, next day -- independent
+    }
+
+    /**
+     * Shared-device re-subscribe (see {@code PushSubscriptionService#subscribe}): {@code endpoint}
+     * is globally unique, so a second browser subscription for the SAME endpoint from a DIFFERENT
+     * user must move ownership rather than duplicate or fail — this is the intended multi-user
+     * behavior, not a bug (see the DELETE /api/account work's IDOR audit).
+     */
+    @Test
+    void pushSubscription_reSubscribeFromAnotherUser_movesOwnershipToTheNewUserThroughTheRealDatabase() throws SQLException {
+        UUID userA = UUID.randomUUID();
+        UUID userB = UUID.randomUUID();
+        String endpoint = "https://push.example/shared-device/" + UUID.randomUUID();
+
+        pushSubscriptionService.subscribe(userA, endpoint, "p256dh-a", "auth-a", "UA-a");
+        assertOwnerForEndpoint(endpoint, userA);
+
+        pushSubscriptionService.subscribe(userB, endpoint, "p256dh-b", "auth-b", "UA-b");
+
+        assertRowCountForEndpoint(endpoint, 1); // still one row -- moved, never duplicated
+        assertOwnerForEndpoint(endpoint, userB);
+        assertP256dhForEndpoint(endpoint, "p256dh-b");
+    }
+
+    /**
+     * The centerpiece of {@code DELETE /api/account} ({@link AccountService}): seeds BOTH users
+     * across every one of the 11 per-user tables plus a minimal {@code auth.users} (this
+     * container's own migrations never create Supabase's real one — see {@code
+     * com.kcalma.account.AuthUserGateway}), deletes user A's account, then proves every one of A's
+     * rows — app-schema AND {@code auth.users} — is gone while every one of B's survives untouched.
+     */
+    @Test
+    void accountService_deleteAccount_removesEveryTableRowAndTheAuthUserForOneUser_leavingAnotherUserIntact() throws SQLException {
+        UUID userA = UUID.randomUUID();
+        UUID userB = UUID.randomUUID();
+        LocalDate today = LocalDate.of(2026, 9, 25);
+        LocalDate weekStart = LocalDate.of(2026, 9, 21);
+
+        createAuthUsersTableIfMissing();
+        insertAuthUser(userA, "user-a@example.test");
+        insertAuthUser(userB, "user-b@example.test");
+
+        seedOneRowPerTableForAccountDeletion(userA, today, weekStart, "milanesa-a");
+        seedOneRowPerTableForAccountDeletion(userB, today, weekStart, "milanesa-b");
+
+        accountService.deleteAccount(userA);
+
+        assertThat(userProfileRepository.findById(userA)).isEmpty();
+        assertThat(userProfileRepository.findById(userB)).isPresent();
+
+        assertThat(foodEntryRepository.findByUserIdAndEntryDateOrderByCreatedAtAsc(userA, today)).isEmpty();
+        assertThat(foodEntryRepository.findByUserIdAndEntryDateOrderByCreatedAtAsc(userB, today)).hasSize(1);
+
+        assertThat(weightEntryRepository.findByUserIdOrderByEntryDateAsc(userA)).isEmpty();
+        assertThat(weightEntryRepository.findByUserIdOrderByEntryDateAsc(userB)).hasSize(1);
+
+        assertThat(userFoodRepository.findByUserIdAndNormalizedName(userA, "milanesa-a")).isEmpty();
+        assertThat(userFoodRepository.findByUserIdAndNormalizedName(userB, "milanesa-b")).isPresent();
+
+        assertThat(favoriteDishRepository.findByUserIdOrderByCreatedAtDesc(userA)).isEmpty();
+        assertThat(favoriteDishRepository.findByUserIdOrderByCreatedAtDesc(userB)).hasSize(1);
+
+        assertThat(waterLogRepository.findByUserIdOrderByEntryDateAsc(userA)).isEmpty();
+        assertThat(waterLogRepository.findByUserIdOrderByEntryDateAsc(userB)).hasSize(1);
+
+        assertThat(measurementRepository.findByUserIdOrderByMeasuredOnAsc(userA)).isEmpty();
+        assertThat(measurementRepository.findByUserIdOrderByMeasuredOnAsc(userB)).hasSize(1);
+
+        assertThat(checkinRepository.findByUserIdAndWeekStart(userA, weekStart)).isEmpty();
+        assertThat(checkinRepository.findByUserIdAndWeekStart(userB, weekStart)).isPresent();
+
+        assertRowCountForEndpoint(accountDeletionEndpointFor(userA), 0);
+        assertRowCountForEndpoint(accountDeletionEndpointFor(userB), 1);
+
+        assertThat(reminderSettingsRepository.findById(userA)).isEmpty();
+        assertThat(reminderSettingsRepository.findById(userB)).isPresent();
+
+        // No repository read beyond claim() exists for reminder_log (see ReminderLogRepository) --
+        // re-claiming the exact same occurrence lands (1) where the row is gone, and loses (0) where
+        // it's still there.
+        assertThat(reminderLogRepository.claim(userA, "MEAL_ALMUERZO", today)).isEqualTo(1);
+        assertThat(reminderLogRepository.claim(userB, "MEAL_ALMUERZO", today)).isEqualTo(0);
+
+        assertThat(authUserExists(userA)).isFalse();
+        assertThat(authUserExists(userB)).isTrue();
+    }
+
+    /** Every one of the 11 per-user tables gets exactly one row for {@code userId}, all dated/keyed consistently. */
+    private void seedOneRowPerTableForAccountDeletion(UUID userId, LocalDate today, LocalDate weekStart, String normalizedName) {
+        UserProfile profile = new UserProfile(userId);
+        profile.setSex(Sex.FEMALE);
+        profile.setBirthDate(LocalDate.of(1990, 1, 1));
+        profile.setHeightCm(165);
+        profile.setWeightKg(new BigDecimal("65.00"));
+        profile.setActivityLevel(ActivityLevel.LIGHTLY_ACTIVE);
+        profile.setGoal(Goal.MAINTAIN);
+        userProfileRepository.save(profile);
+
+        foodEntryRepository.save(new FoodEntry(
+                userId, today, MealType.ALMUERZO, normalizedName, new BigDecimal("100.00"), new BigDecimal("200.00"),
+                new BigDecimal("10.00"), new BigDecimal("5.00"), new BigDecimal("20.00"), new BigDecimal("2.00"),
+                new BigDecimal("1.00"), new BigDecimal("50.00"), FoodSource.MANUAL, null, null));
+
+        weightEntryRepository.save(new WeightEntry(userId, today, new BigDecimal("65.00")));
+
+        userFoodRepository.save(new UserFood(
+                userId, normalizedName, normalizedName, new NutritionMath.Per100(200, 10, 5, 20, 2, 1, 50), UserFoodSource.USER, null));
+
+        FavoriteDish favorite = new FavoriteDish(userId, normalizedName);
+        favorite.applyDish(
+                MealType.ALMUERZO, normalizedName, new BigDecimal("100.00"), new BigDecimal("200.00"), new BigDecimal("10.00"),
+                new BigDecimal("5.00"), new BigDecimal("20.00"), new BigDecimal("2.00"), new BigDecimal("1.00"),
+                new BigDecimal("50.00"), FoodSource.MANUAL, null, null);
+        favoriteDishRepository.save(favorite);
+
+        waterLogRepository.save(new WaterLog(userId, today, 500));
+
+        BodyMeasurement measurement = new BodyMeasurement(userId, today);
+        measurement.setWaistCm(new BigDecimal("80.00"));
+        measurementRepository.save(measurement);
+
+        TdeeCheckin checkin = new TdeeCheckin(userId, weekStart);
+        checkin.recompute(
+                weekStart.minusDays(21), weekStart.minusDays(1), 2500,
+                new TdeeAdaptationCalculator.Result(CheckinStatus.PENDING, 15, 8, 2100, -0.5, 2500, 2500, Confidence.MEDIUM, List.of()));
+        checkinRepository.save(checkin);
+
+        pushSubscriptionService.subscribe(userId, accountDeletionEndpointFor(userId), "p256dh", "auth-key", "UA");
+
+        reminderSettingsRepository.save(new ReminderSettings(userId, ReminderSettingsData.defaults()));
+
+        reminderLogRepository.claim(userId, "MEAL_ALMUERZO", today);
+    }
+
+    private static String accountDeletionEndpointFor(UUID userId) {
+        return "https://push.example/account-deletion/" + userId;
+    }
+
+    private void createAuthUsersTableIfMissing() throws SQLException {
+        try (Connection connection = dataSource.getConnection();
+                Statement statement = connection.createStatement()) {
+            statement.executeUpdate("CREATE SCHEMA IF NOT EXISTS auth");
+            statement.executeUpdate("CREATE TABLE IF NOT EXISTS auth.users (id uuid PRIMARY KEY, email text)");
+        }
+    }
+
+    private void insertAuthUser(UUID id, String email) throws SQLException {
+        try (Connection connection = dataSource.getConnection();
+                java.sql.PreparedStatement statement =
+                        connection.prepareStatement("INSERT INTO auth.users (id, email) VALUES (?, ?)")) {
+            statement.setObject(1, id);
+            statement.setString(2, email);
+            statement.executeUpdate();
+        }
+    }
+
+    private boolean authUserExists(UUID id) throws SQLException {
+        try (Connection connection = dataSource.getConnection();
+                java.sql.PreparedStatement statement =
+                        connection.prepareStatement("SELECT 1 FROM auth.users WHERE id = ?")) {
+            statement.setObject(1, id);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next();
+            }
+        }
+    }
+
+    private void assertOwnerForEndpoint(String endpoint, UUID expectedUserId) throws SQLException {
+        try (Connection connection = dataSource.getConnection();
+                java.sql.PreparedStatement statement =
+                        connection.prepareStatement("SELECT user_id FROM app.push_subscription WHERE endpoint = ?")) {
+            statement.setString(1, endpoint);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                assertThat(resultSet.next()).isTrue();
+                assertThat(resultSet.getObject("user_id", UUID.class)).isEqualTo(expectedUserId);
+            }
+        }
     }
 }

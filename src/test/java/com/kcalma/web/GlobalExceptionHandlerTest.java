@@ -2,6 +2,7 @@ package com.kcalma.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.kcalma.ratelimit.GlobalAiCapExceededException;
 import com.kcalma.ratelimit.RateLimitExceededException;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -50,6 +51,17 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getHeaders().getFirst(HttpHeaders.RETRY_AFTER)).isEqualTo("42");
         assertThat(response.getBody())
                 .containsEntry("message", "Llegaste al límite de análisis por ahora. Probá de nuevo en unos minutos.");
+    }
+
+    /** Distinct from {@link #handleRateLimit_returns429WithRetryAfterHeaderAndSpanishMessage}: same 429 shape, different (app-wide) Spanish message. */
+    @Test
+    void handleGlobalAiCap_returns429WithRetryAfterHeaderAndTheSaturatedMessage() {
+        ResponseEntity<Map<String, String>> response = handler.handleGlobalAiCap(new GlobalAiCapExceededException(90));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+        assertThat(response.getHeaders().getFirst(HttpHeaders.RETRY_AFTER)).isEqualTo("90");
+        assertThat(response.getBody())
+                .containsEntry("message", "La IA está saturada en este momento. Probá en un rato o cargá la comida a mano.");
     }
 
     @Test

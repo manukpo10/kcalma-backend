@@ -2,17 +2,24 @@ package com.kcalma.ratelimit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
+import com.kcalma.security.AppSecurityProperties;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
  * Unit test for {@link GeminiRateLimiter}'s sliding-window algorithm: the short burst window, the
  * daily window, and the Retry-After computation — all driven by a mutable test {@link Clock} so
- * "time passing" is deterministic instead of sleeping in the test.
+ * "time passing" is deterministic instead of sleeping in the test. Also covers the orchestration
+ * this class now does on top of that: delegating to {@link GeminiGlobalRateLimiter} unless the
+ * caller is an admin (see {@link AppSecurityProperties#isAdmin(String)}).
  */
 class GeminiRateLimiterTest {
 
@@ -20,7 +27,7 @@ class GeminiRateLimiterTest {
 
     @Test
     void checkAndRecord_underBothLimits_neverThrows() {
-        GeminiRateLimiter limiter = new GeminiRateLimiter(
+        GeminiRateLimiter limiter = limiterWith(
                 propertiesWith(5, 10, 100), new MutableClock(Instant.parse("2026-09-25T12:00:00Z")));
 
         for (int i = 0; i < 5; i++) {
@@ -30,7 +37,7 @@ class GeminiRateLimiterTest {
 
     @Test
     void checkAndRecord_windowRequestsReached_rejectsTheNextOneWithRetryAfter() {
-        GeminiRateLimiter limiter = new GeminiRateLimiter(
+        GeminiRateLimiter limiter = limiterWith(
                 propertiesWith(3, 10, 100), new MutableClock(Instant.parse("2026-09-25T12:00:00Z")));
 
         limiter.checkAndRecord(USER);
@@ -46,7 +53,7 @@ class GeminiRateLimiterTest {
 
     @Test
     void checkAndRecord_differentUsers_haveIndependentQuotas() {
-        GeminiRateLimiter limiter = new GeminiRateLimiter(
+        GeminiRateLimiter limiter = limiterWith(
                 propertiesWith(1, 10, 100), new MutableClock(Instant.parse("2026-09-25T12:00:00Z")));
 
         limiter.checkAndRecord("user-a");
@@ -58,7 +65,7 @@ class GeminiRateLimiterTest {
     @Test
     void checkAndRecord_afterWindowElapses_allowsRequestsAgain() {
         MutableClock clock = new MutableClock(Instant.parse("2026-09-25T12:00:00Z"));
-        GeminiRateLimiter limiter = new GeminiRateLimiter(propertiesWith(2, 10, 100), clock);
+        GeminiRateLimiter limiter = limiterWith(propertiesWith(2, 10, 100), clock);
 
         limiter.checkAndRecord(USER);
         limiter.checkAndRecord(USER);
@@ -72,7 +79,7 @@ class GeminiRateLimiterTest {
     @Test
     void checkAndRecord_dailyRequestsReached_rejectsEvenWithTheShortWindowClear() {
         MutableClock clock = new MutableClock(Instant.parse("2026-09-25T12:00:00Z"));
-        GeminiRateLimiter limiter = new GeminiRateLimiter(propertiesWith(100, 1, 3), clock);
+        GeminiRateLimiter limiter = limiterWith(propertiesWith(100, 1, 3), clock);
 
         for (int i = 0; i < 3; i++) {
             limiter.checkAndRecord(USER);
@@ -86,11 +93,86 @@ class GeminiRateLimiterTest {
     void checkAndRecord_disabled_neverThrowsRegardlessOfVolume() {
         RateLimitProperties properties = propertiesWith(1, 10, 1);
         properties.setEnabled(false);
-        GeminiRateLimiter limiter = new GeminiRateLimiter(properties, new MutableClock(Instant.parse("2026-09-25T12:00:00Z")));
+        GeminiRateLimiter limiter = limiterWith(properties, new MutableClock(Instant.parse("2026-09-25T12:00:00Z")));
 
         for (int i = 0; i < 10; i++) {
             limiter.checkAndRecord(USER);
         }
+    }
+
+    @Test
+    void checkAndRecord_nonAdmin_delegatesToTheGlobalLimiter() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-09-25T12:00:00Z"));
+        GeminiGlobalRateLimiter globalRateLimiter = mock(GeminiGlobalRateLimiter.class);
+        GeminiRateLimiter limiter =
+                new GeminiRateLimiter(propertiesWith(100, 10, 1000), globalRateLimiter, adminsOf(), clock);
+
+        limiter.checkAndRecord(USER);
+
+        verify(globalRateLimiter, times(1)).checkAndRecord();
+    }
+
+    @Test
+    void checkAndRecord_admin_skipsTheGlobalLimiterEvenWhenItWouldReject() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-09-25T12:00:00Z"));
+        GeminiGlobalRateLimiter exhaustedGlobalLimiter = new GeminiGlobalRateLimiter(globalPropertiesWith(0, 0), clock);
+        GeminiRateLimiter limiter =
+                new GeminiRateLimiter(propertiesWith(100, 10, 1000), exhaustedGlobalLimiter, adminsOf(USER), clock);
+
+        // The global limiter above rejects EVERY call (0/0 quota) -- an admin must never reach it.
+        limiter.checkAndRecord(USER);
+        limiter.checkAndRecord(USER);
+    }
+
+    @Test
+    void checkAndRecord_nonAdmin_globalCapExceeded_propagatesGlobalAiCapExceededException() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-09-25T12:00:00Z"));
+        GeminiGlobalRateLimiter exhaustedGlobalLimiter = new GeminiGlobalRateLimiter(globalPropertiesWith(0, 0), clock);
+        GeminiRateLimiter limiter =
+                new GeminiRateLimiter(propertiesWith(100, 10, 1000), exhaustedGlobalLimiter, adminsOf(), clock);
+
+        assertThatThrownBy(() -> limiter.checkAndRecord(USER)).isInstanceOf(GlobalAiCapExceededException.class);
+    }
+
+    @Test
+    void checkAndRecord_admin_skipsOwnDailyCapButStillGetsRecordedForTheBurstWindow() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-09-25T12:00:00Z"));
+        GeminiGlobalRateLimiter globalRateLimiter = new GeminiGlobalRateLimiter(globalPropertiesWith(1_000_000, 1_000_000), clock);
+        // dailyRequests = 2 -- a non-admin would be rejected on the 3rd call (see the sibling
+        // non-admin daily test above); this admin sails through it.
+        GeminiRateLimiter limiter = new GeminiRateLimiter(propertiesWith(100, 1, 2), globalRateLimiter, adminsOf(USER), clock);
+
+        limiter.checkAndRecord(USER);
+        limiter.checkAndRecord(USER);
+        limiter.checkAndRecord(USER);
+    }
+
+    @Test
+    void checkAndRecord_admin_stillRejectedByTheirOwnBurstWindow() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-09-25T12:00:00Z"));
+        GeminiGlobalRateLimiter globalRateLimiter = new GeminiGlobalRateLimiter(globalPropertiesWith(1_000_000, 1_000_000), clock);
+        // windowRequests = 2, dailyRequests effectively unlimited -- only the burst window can reject here.
+        GeminiRateLimiter limiter =
+                new GeminiRateLimiter(propertiesWith(2, 10, 1_000_000), globalRateLimiter, adminsOf(USER), clock);
+
+        limiter.checkAndRecord(USER);
+        limiter.checkAndRecord(USER);
+
+        assertThatThrownBy(() -> limiter.checkAndRecord(USER)).isInstanceOf(RateLimitExceededException.class);
+    }
+
+    @Test
+    void checkAndRecord_ownLimitExceeded_neverReachesTheGlobalLimiter() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-09-25T12:00:00Z"));
+        GeminiGlobalRateLimiter globalRateLimiter = mock(GeminiGlobalRateLimiter.class);
+        GeminiRateLimiter limiter = new GeminiRateLimiter(propertiesWith(1, 10, 100), globalRateLimiter, adminsOf(), clock);
+
+        limiter.checkAndRecord(USER);
+        assertThatThrownBy(() -> limiter.checkAndRecord(USER)).isInstanceOf(RateLimitExceededException.class);
+
+        // Only the first, successful call reached the global limiter -- the second never got past
+        // this user's own exhausted window.
+        verify(globalRateLimiter, times(1)).checkAndRecord();
     }
 
     private static RateLimitProperties propertiesWith(int windowRequests, int windowMinutes, int dailyRequests) {
@@ -99,6 +181,24 @@ class GeminiRateLimiterTest {
         properties.setWindowMinutes(windowMinutes);
         properties.setDailyRequests(dailyRequests);
         return properties;
+    }
+
+    private static GlobalRateLimitProperties globalPropertiesWith(int perMinute, int perDay) {
+        GlobalRateLimitProperties properties = new GlobalRateLimitProperties();
+        properties.setPerMinute(perMinute);
+        properties.setPerDay(perDay);
+        return properties;
+    }
+
+    private static AppSecurityProperties adminsOf(String... admins) {
+        AppSecurityProperties properties = new AppSecurityProperties();
+        properties.setOwnerUserIds(Set.of(admins));
+        return properties;
+    }
+
+    /** A generously-quota'd global limiter that never trips during these per-user-focused tests, plus no admins. */
+    private static GeminiRateLimiter limiterWith(RateLimitProperties properties, Clock clock) {
+        return new GeminiRateLimiter(properties, new GeminiGlobalRateLimiter(globalPropertiesWith(1_000_000, 1_000_000), clock), adminsOf(), clock);
     }
 
     /** A {@link Clock} whose {@link #instant()} can be advanced on demand — deterministic "time passing" for tests. */

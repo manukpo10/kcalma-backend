@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 /** Owner-only (see {@code com.kcalma.security.SecurityConfig}'s blanket {@code /api/**} rule) — no extra security wiring needed here. */
 @RestController
@@ -40,8 +41,19 @@ public class PushController {
     @PostMapping("/subscriptions")
     public ResponseEntity<Void> subscribe(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody SubscribeRequest request) {
         UUID userId = UUID.fromString(jwt.getSubject());
+        validateEndpoint(request.endpoint());
         subscriptionService.subscribe(userId, request.endpoint(), request.keys().p256dh(), request.keys().auth(), request.userAgent());
         return ResponseEntity.status(HttpStatus.CREATED).build();
+    }
+
+    /**
+     * SSRF guard: only a real browser push service's endpoint may ever be stored, since {@link
+     * WebPushSender} later POSTs straight to it -- see {@link PushEndpointPolicy} for the allowlist.
+     */
+    private void validateEndpoint(String endpoint) {
+        if (!PushEndpointPolicy.isAllowed(endpoint)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Endpoint de notificaciones no válido.");
+        }
     }
 
     @DeleteMapping("/subscriptions")

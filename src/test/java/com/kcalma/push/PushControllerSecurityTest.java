@@ -3,6 +3,7 @@ package com.kcalma.push;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -12,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.kcalma.security.SecurityConfig;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -81,7 +83,7 @@ class PushControllerSecurityTest {
         when(jwtDecoder.decode(TOKEN)).thenReturn(jwtFor(OWNER_ID));
         String body =
                 """
-                {"endpoint":"https://push.example/abc","keys":{"p256dh":"p-key","auth":"a-key"},"userAgent":"Mozilla/5.0"}
+                {"endpoint":"https://fcm.googleapis.com/fcm/send/abc","keys":{"p256dh":"p-key","auth":"a-key"},"userAgent":"Mozilla/5.0"}
                 """;
 
         mockMvc.perform(post("/api/push/subscriptions")
@@ -91,7 +93,7 @@ class PushControllerSecurityTest {
                 .andExpect(status().isCreated());
 
         verify(subscriptionService)
-                .subscribe(UUID.fromString(OWNER_ID), "https://push.example/abc", "p-key", "a-key", "Mozilla/5.0");
+                .subscribe(UUID.fromString(OWNER_ID), "https://fcm.googleapis.com/fcm/send/abc", "p-key", "a-key", "Mozilla/5.0");
     }
 
     @Test
@@ -101,8 +103,78 @@ class PushControllerSecurityTest {
         mockMvc.perform(post("/api/push/subscriptions")
                         .header("Authorization", "Bearer " + TOKEN)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"endpoint\":\"https://push.example/abc\"}"))
+                        .content("{\"endpoint\":\"https://fcm.googleapis.com/fcm/send/abc\"}"))
                 .andExpect(status().isBadRequest());
+    }
+
+    /**
+     * SSRF guard (see {@code PushEndpointPolicy}): every real push service host a browser's {@code
+     * SubscribeRequest.endpoint} can legitimately carry is accepted, proving the controller's
+     * allowlist check isn't accidentally narrower than the four vendors it's meant to cover.
+     */
+    @Test
+    void owner_subscribe_everyRealPushServiceHost_isAccepted() throws Exception {
+        when(jwtDecoder.decode(TOKEN)).thenReturn(jwtFor(OWNER_ID));
+        List<String> allowedEndpoints = List.of(
+                "https://web.push.apple.com/subscribe/abc123",
+                "https://fcm.googleapis.com/fcm/send/abc123",
+                "https://updates.push.services.mozilla.com/wpush/v2/abc123",
+                "https://wns2-par02p.notify.windows.com/w/?token=abc123");
+
+        for (String endpoint : allowedEndpoints) {
+            String body =
+                    """
+                    {"endpoint":"%s","keys":{"p256dh":"p-key","auth":"a-key"},"userAgent":"Mozilla/5.0"}
+                    """
+                            .formatted(endpoint);
+
+            mockMvc.perform(post("/api/push/subscriptions")
+                            .header("Authorization", "Bearer " + TOKEN)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isCreated());
+        }
+    }
+
+    /**
+     * SSRF guard: a non-push-service endpoint must be rejected before it ever reaches {@link
+     * PushSubscriptionService}, with the exact Spanish message the frontend shows.
+     */
+    @Test
+    void owner_subscribe_disallowedEndpoint_returns400AndNeverReachesTheService() throws Exception {
+        when(jwtDecoder.decode(TOKEN)).thenReturn(jwtFor(OWNER_ID));
+        String body =
+                """
+                {"endpoint":"https://evil.example/collect","keys":{"p256dh":"p-key","auth":"a-key"},"userAgent":"Mozilla/5.0"}
+                """;
+
+        mockMvc.perform(post("/api/push/subscriptions")
+                        .header("Authorization", "Bearer " + TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Endpoint de notificaciones no válido."));
+
+        verifyNoInteractions(subscriptionService);
+    }
+
+    /** A sneaky lookalike host (real allowed name as a SUBdomain of an attacker's own domain) must not slip past the allowlist. */
+    @Test
+    void owner_subscribe_lookalikeHostDisguisedWithUserinfo_returns400() throws Exception {
+        when(jwtDecoder.decode(TOKEN)).thenReturn(jwtFor(OWNER_ID));
+        String body =
+                """
+                {"endpoint":"https://fcm.googleapis.com@evil.com/x","keys":{"p256dh":"p-key","auth":"a-key"},"userAgent":"Mozilla/5.0"}
+                """;
+
+        mockMvc.perform(post("/api/push/subscriptions")
+                        .header("Authorization", "Bearer " + TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Endpoint de notificaciones no válido."));
+
+        verifyNoInteractions(subscriptionService);
     }
 
     @Test

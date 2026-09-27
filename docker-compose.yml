@@ -1,0 +1,26 @@
+name: kcalma
+
+# Local development database only -- never used in production (Render connects straight to
+# Supabase). Deliberately on a non-default host port (5433) so it can run alongside a local
+# Postgres install on the usual 5432 without clashing. See README.md for how to point the app at
+# this instead of the (production!) Supabase DB the committed .env is normally configured for.
+services:
+  postgres:
+    image: postgres:17
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: kcalma
+      POSTGRES_USER: kcalma
+      POSTGRES_PASSWORD: kcalma
+    volumes:
+      - ./docker/init:/docker-entrypoint-initdb.d:ro
+      - kcalma-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kcalma -d kcalma"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  kcalma-postgres-data:

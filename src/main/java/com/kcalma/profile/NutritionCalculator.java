@@ -10,13 +10,18 @@ import java.util.Objects;
  *
  * <p>Pipeline: Mifflin-St Jeor BMR x activity factor -&gt; TDEE -&gt; weekly rate of change (%% of
  * body weight, by goal x pace; RECOMP uses a fixed -10%% of TDEE instead) -&gt; daily calorie
- * adjustment (capped at a 25%% TDEE deficit) -&gt; calorie floor clamp -&gt; protein basis (lean
- * mass, BMI-adjusted weight, or body weight) x g/kg (by goal x basis, +0.3 g/kg for HIGH_PROTEIN)
- * -&gt; fat/carb split (by diet style) -&gt; fiber/sugar (overridden for KETO) -&gt; sodium cap
- * -&gt; water (35 ml/kg of body weight).
+ * adjustment (capped at a 25%% TDEE deficit) -&gt; calorie floor clamp, deficit goals only, never
+ * above TDEE (see {@link Goal#isDeficit()}) -&gt; the rate/adjustment are recomputed against
+ * whatever calorie target the floor actually left, so display and the goal-date projection never
+ * show a rate the calories don't back up -&gt; protein basis (lean mass, BMI-adjusted weight, or
+ * body weight) x g/kg (by goal x basis x whether the profile trains with weights, +0.3 g/kg for
+ * HIGH_PROTEIN) -&gt; fat/carb split (by diet style) -&gt; fiber (floored at 25 g) /sugar (overridden
+ * for KETO) -&gt; sodium cap -&gt; water (35 ml/kg of the same BMI-adjusted weight above BMI 30, else
+ * body weight; clamped to a safe range).
  *
  * <p>Evidence behind the protein g/kg tables (see {@link ProteinBasis}): Helms et al. 2014, Iraki
- * et al. 2019, Morton et al. 2018, and the ISSN 2017 position stand.
+ * et al. 2019, Morton et al. 2018, and the ISSN 2017 position stand for the resistance-trained
+ * tables; see {@link ProteinBasis} for the untrained (non-strength-training) table's own evidence.
  */
 public final class NutritionCalculator {
 
@@ -28,9 +33,18 @@ public final class NutritionCalculator {
     private static final double KETO_FIBER_GRAMS = 20.0;
     private static final double KETO_SUGAR_MAX_PERCENT_OF_CALORIES = 0.05;
     private static final double FIBER_GRAMS_PER_1000_KCAL = 14.0;
-    private static final double FREE_SUGAR_MAX_PERCENT_OF_CALORIES = 0.10;
+    private static final double MIN_FIBER_GRAMS = 25.0;
+    /**
+     * Total sugars (USDA {@code sugars, total}) as consumed/logged by this app — not "free" or
+     * "added" sugars (WHO's own, stricter 10%-of-calories guidance is about added sugars only, a
+     * quantity this app has no reliable way to isolate from a logged food's total sugar content).
+     * 18% of calories / 4 kcal-per-gram mirrors the EU reference intake of 90 g per 2000 kcal.
+     */
+    private static final double TOTAL_SUGAR_MAX_PERCENT_OF_CALORIES = 0.18;
     private static final int SODIUM_MAX_MG = 2000;
     private static final double WATER_ML_PER_KG = 35.0;
+    private static final double WATER_ML_MIN = 1500.0;
+    private static final double WATER_ML_MAX = 3500.0;
     private static final double FEMALE_CALORIE_FLOOR = 1200.0;
     private static final double MALE_CALORIE_FLOOR = 1500.0;
     private static final double DEFICIT_CAP_PERCENT_OF_TDEE = 0.25;
@@ -62,14 +76,36 @@ public final class NutritionCalculator {
         }
 
         RateResult rate = weeklyRate(input.goal(), input.pace(), input.weightKg(), tdee);
-
-        double floor = input.sex() == Sex.FEMALE ? FEMALE_CALORIE_FLOOR : MALE_CALORIE_FLOOR;
         double rateAdjustedCalories = tdee + rate.dailyAdjustmentKcal();
-        boolean floorApplied = rateAdjustedCalories < floor;
-        double targetCalories = Math.max(rateAdjustedCalories, floor);
+
+        // Fix 1: the safety floor only makes sense for goals that actually run a deficit (RECOMP's
+        // fixed -10% included) -- MAINTAIN and the gain goals never clamp up to it. Even for a
+        // deficit goal, the floor itself is never allowed to sit above TDEE: when someone's TDEE is
+        // already below the sex-based floor, there's no safe deficit to apply at all, so the target
+        // falls back to TDEE (maintenance) with DEFICIT_NOT_POSSIBLE instead of FLOOR_APPLIED.
+        boolean floorApplied = false;
+        boolean deficitNotPossible = false;
+        double targetCalories;
+        if (input.goal().isDeficit()) {
+            double sexFloor = input.sex() == Sex.FEMALE ? FEMALE_CALORIE_FLOOR : MALE_CALORIE_FLOOR;
+            double floor = Math.min(sexFloor, tdee);
+            targetCalories = Math.max(rateAdjustedCalories, floor);
+            deficitNotPossible = tdee < sexFloor;
+            floorApplied = !deficitNotPossible && rateAdjustedCalories < floor;
+        } else {
+            targetCalories = rateAdjustedCalories;
+        }
+
+        // Fix 2: once the floor (if any) has settled the actual calorie target, the rate/adjustment
+        // are recomputed FROM that target rather than reused from the pre-floor pace math -- so a
+        // profile whose calories barely moved (because the floor caught almost all of the requested
+        // deficit) shows a rate that barely moved either, instead of the bigger one the pace alone
+        // would have implied. Both fields feed display and GoalProjectionCalculator's projection.
+        double dailyAdjustmentKcal = targetCalories - tdee;
+        double weeklyRateKg = dailyAdjustmentKcal * 7 / KCAL_PER_KG_OF_BODY_MASS;
 
         ProteinResult protein = proteinBasis(input);
-        double proteinFactor = protein.basis().gramsPerKg(input.goal());
+        double proteinFactor = protein.basis().gramsPerKg(input.goal(), input.strengthTraining());
         if (input.dietStyle() == DietStyle.HIGH_PROTEIN) {
             proteinFactor = Math.min(proteinFactor + HIGH_PROTEIN_BONUS_GRAMS_PER_KG, protein.basis().highProteinCapGramsPerKg());
         }
@@ -77,10 +113,15 @@ public final class NutritionCalculator {
         double proteinCalories = proteinGrams * 4;
 
         MacroSplit macros = macroSplit(input.dietStyle(), targetCalories, proteinCalories, protein.basisKg());
-        double waterMl = input.weightKg() * WATER_ML_PER_KG;
+        double waterMl = waterMl(input.weightKg(), input.heightCm());
 
         List<TargetNote> notes = new ArrayList<>();
-        if (floorApplied) {
+        if (deficitNotPossible) {
+            notes.add(new TargetNote(
+                    NoteCode.DEFICIT_NOT_POSSIBLE,
+                    "Tu gasto estimado es menor al mínimo seguro, así que no se aplica déficit. Sumá actividad física o"
+                            + " consultá a un profesional."));
+        } else if (floorApplied) {
             notes.add(new TargetNote(NoteCode.FLOOR_APPLIED, "Se aplicó un piso calórico mínimo de seguridad."));
         }
         if (rate.capped()) {
@@ -105,8 +146,8 @@ public final class NutritionCalculator {
                 round(macros.sugarMaxGrams()),
                 SODIUM_MAX_MG,
                 round(waterMl),
-                round2(rate.weeklyRateKg()),
-                round(rate.dailyAdjustmentKcal()),
+                round2(weeklyRateKg),
+                round(dailyAdjustmentKcal),
                 protein.basis(),
                 round2(protein.basisKg()),
                 protein.leanMassKg() == null ? null : round2(protein.leanMassKg()),
@@ -132,7 +173,9 @@ public final class NutritionCalculator {
     /**
      * Weekly rate of change (kg/week, signed: negative = loss) and the daily calorie adjustment it
      * implies, capped so the adjustment is never more of a deficit than {@value
-     * #DEFICIT_CAP_PERCENT_OF_TDEE} of TDEE (surpluses are never capped).
+     * #DEFICIT_CAP_PERCENT_OF_TDEE} of TDEE (surpluses are never capped). This is the PRE-floor
+     * request implied by the goal/pace alone — see {@link #calculate(Input, double)} for how the
+     * floor can still shrink it further before it's ever shown to the user.
      */
     private RateResult weeklyRate(Goal goal, Pace pace, double weightKg, double tdee) {
         double weeklyRateKg;
@@ -190,11 +233,34 @@ public final class NutritionCalculator {
             return new ProteinResult(ProteinBasis.LEAN_MASS, leanMassKg, leanMassKg);
         }
         if (bmi >= BMI_ADJUSTED_WEIGHT_THRESHOLD) {
-            double referenceWeightKg = REFERENCE_BMI_FOR_ADJUSTED_WEIGHT * heightM * heightM;
-            double adjustedWeightKg = referenceWeightKg + ADJUSTED_WEIGHT_LEAN_FRACTION * (input.weightKg() - referenceWeightKg);
-            return new ProteinResult(ProteinBasis.ADJUSTED_WEIGHT, adjustedWeightKg, null);
+            return new ProteinResult(ProteinBasis.ADJUSTED_WEIGHT, adjustedWeightKg(input.weightKg(), heightM), null);
         }
         return new ProteinResult(ProteinBasis.BODY_WEIGHT, input.weightKg(), null);
+    }
+
+    /**
+     * Water target: 35 ml/kg of the same BMI-adjusted weight {@link #proteinBasis} uses for
+     * ADJUSTED_WEIGHT once BMI &ge; 30 -- independently of whether {@code bodyFatPct} is known (so
+     * even a LEAN_MASS-basis profile's water still switches to the adjusted weight above that BMI),
+     * since raw body weight would overstate hydration needs the same way it would overstate protein
+     * needs. Falls back to raw body weight below that threshold. Clamped to a safe [{@value
+     * #WATER_ML_MIN}, {@value #WATER_ML_MAX}] ml range either way.
+     */
+    private double waterMl(double weightKg, double heightCm) {
+        double heightM = heightCm / 100.0;
+        double bmi = weightKg / (heightM * heightM);
+        double basisKg = bmi >= BMI_ADJUSTED_WEIGHT_THRESHOLD ? adjustedWeightKg(weightKg, heightM) : weightKg;
+        return clamp(basisKg * WATER_ML_PER_KG, WATER_ML_MIN, WATER_ML_MAX);
+    }
+
+    /** Shared by {@link #proteinBasis} and {@link #waterMl}: a metabolically-adjusted weight between "ideal" (BMI 25) and actual. */
+    private static double adjustedWeightKg(double weightKg, double heightM) {
+        double referenceWeightKg = REFERENCE_BMI_FOR_ADJUSTED_WEIGHT * heightM * heightM;
+        return referenceWeightKg + ADJUSTED_WEIGHT_LEAN_FRACTION * (weightKg - referenceWeightKg);
+    }
+
+    private static double clamp(double value, double min, double max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     /** Fat/carb split (and fiber/sugar, overridden for KETO) once protein is already fixed. */
@@ -208,8 +274,8 @@ public final class NutritionCalculator {
                 yield new MacroSplit(
                         fatGrams,
                         carbCalories / 4,
-                        FIBER_GRAMS_PER_1000_KCAL * (targetCalories / 1000.0),
-                        (targetCalories * FREE_SUGAR_MAX_PERCENT_OF_CALORIES) / 4,
+                        Math.max(FIBER_GRAMS_PER_1000_KCAL * (targetCalories / 1000.0), MIN_FIBER_GRAMS),
+                        (targetCalories * TOTAL_SUGAR_MAX_PERCENT_OF_CALORIES) / 4,
                         false);
             }
             case LOW_CARB -> {
@@ -218,8 +284,8 @@ public final class NutritionCalculator {
                 yield new MacroSplit(
                         fatCalories / 9,
                         carbGrams,
-                        FIBER_GRAMS_PER_1000_KCAL * (targetCalories / 1000.0),
-                        (targetCalories * FREE_SUGAR_MAX_PERCENT_OF_CALORIES) / 4,
+                        Math.max(FIBER_GRAMS_PER_1000_KCAL * (targetCalories / 1000.0), MIN_FIBER_GRAMS),
+                        (targetCalories * TOTAL_SUGAR_MAX_PERCENT_OF_CALORIES) / 4,
                         false);
             }
             case KETO -> {
@@ -284,6 +350,8 @@ public final class NutritionCalculator {
 
     public enum NoteCode {
         FLOOR_APPLIED,
+        /** A deficit goal whose TDEE is already at/under the sex-based safety floor: target falls back to TDEE instead. */
+        DEFICIT_NOT_POSSIBLE,
         RATE_CAPPED,
         STRENGTH_TRAINING_RECOMMENDED,
         KETO_FIBER

@@ -26,6 +26,15 @@ public enum Goal {
         return this != RECOMP && this != MAINTAIN;
     }
 
+    /**
+     * Whether this goal runs a calorie deficit — the gate for {@code NutritionCalculator}'s safety
+     * floor (see its class doc): LOSE_FAT/LOSE_WEIGHT (pace-based) and RECOMP (its own fixed -10%
+     * of TDEE) all do; MAINTAIN and the gain goals never do, so they never clamp up to the floor.
+     */
+    public boolean isDeficit() {
+        return isWeightLoss() || this == RECOMP;
+    }
+
     /** LOSE_FAT/LOSE_WEIGHT move the weekly rate (and its calorie adjustment) in the negative direction. */
     public boolean isWeightLoss() {
         return this == LOSE_FAT || this == LOSE_WEIGHT;

@@ -26,7 +26,7 @@ import java.util.List;
  */
 public record ProfileRequest(
         @NotNull Sex sex,
-        @NotNull @Past LocalDate birthDate,
+        @NotNull @Past @AgeRange LocalDate birthDate,
         @NotNull @Min(50) @Max(250) Integer heightCm,
         @NotNull @DecimalMin("20.0") @DecimalMax("500.0") BigDecimal weightKg,
         @NotNull ActivityLevel activityLevel,
